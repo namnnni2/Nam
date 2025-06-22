@@ -1,0 +1,87 @@
+-- ✅ Ngăn chạy nhiều lần
+if _G.ScriptAlreadyRunning then return end
+_G.ScriptAlreadyRunning = true
+
+-- ✅ Cấu hình
+local VALID_PLACE_ID = 126884695634066
+local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local LocalPlayer = Players.LocalPlayer
+
+-- ✅ Hàm tìm server public khác
+local function findPublicServer()
+    local cursor = ""
+    local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(VALID_PLACE_ID)
+
+    while true do
+        local finalUrl = url .. (cursor ~= "" and "&cursor=" .. cursor or "")
+        local success, result = pcall(function()
+            return HttpService:JSONDecode(game:HttpGet(finalUrl))
+        end)
+
+        if success and result and result.data then
+            for _, server in ipairs(result.data) do
+                if server.playing < 5 and server.id ~= game.JobId then
+                    return server.id
+                end
+            end
+            if result.nextPageCursor then
+                cursor = result.nextPageCursor
+            else
+                break
+            end
+        else
+            break
+        end
+    end
+
+    return nil
+end
+
+-- ✅ Kiểm tra sai game
+if game.PlaceId ~= VALID_PLACE_ID then
+    warn("Not in the correct game - switching server")
+    local newServer = findPublicServer()
+    if newServer then
+        TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
+    else
+        LocalPlayer:Kick("No valid server found.")
+    end
+    return
+end
+
+-- ✅ Kiểm tra server VIP
+if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then
+    warn("This is a VIP server - switching to a public server")
+    local newServer = findPublicServer()
+    if newServer then
+        TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
+    else
+        LocalPlayer:Kick("No public server found.")
+    end
+    return
+end
+
+-- ✅ Quá 5 người → chuyển server
+if #Players:GetPlayers() > 5 then
+    warn("Server has too many players - switching to another one")
+    local newServer = findPublicServer()
+    if newServer then
+        TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
+    else
+        LocalPlayer:Kick("No less populated server found.")
+    end
+    return
+end
+
+-- ✅ Nếu mọi điều kiện đều hợp lệ
+print("✅ Valid server detected - running main script")
+
+-- 🔁 Gọi script chính từ GitHub
+local success, err = pcall(function()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/GrowaGarden/refs/heads/main/NoLagHub"))()
+end)
+if not success then
+    warn("Failed to load main script:", err)
+end
