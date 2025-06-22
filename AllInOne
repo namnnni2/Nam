@@ -1,8 +1,8 @@
--- ✅ Prevent duplicate execution
+-- ✅ Ngăn chạy nhiều lần
 if _G.ScriptAlreadyRunning then return end
 _G.ScriptAlreadyRunning = true
 
--- ✅ Config
+-- ✅ Cấu hình
 local VALID_PLACE_ID = 126884695634066
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
@@ -13,7 +13,7 @@ local LocalPlayer = Players.LocalPlayer
 _G.LastJobId = _G.LastJobId or game.JobId
 local currentJobId = game.JobId
 
--- ✅ Function: Find a valid public server
+-- ✅ Hàm tìm server public phù hợp (<= 5 người)
 local function findPublicServer()
     local cursor = ""
     local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(VALID_PLACE_ID)
@@ -42,7 +42,7 @@ local function findPublicServer()
     return nil
 end
 
--- ✅ Hàm kiểm tra xem có cần chuyển server không
+-- ✅ Hàm kiểm tra nếu server hiện tại không hợp lệ
 local function shouldTeleport()
     if game.PlaceId ~= VALID_PLACE_ID then return true end
     if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then return true end
@@ -50,34 +50,34 @@ local function shouldTeleport()
     return false
 end
 
--- ✅ Nếu server hiện tại không hợp lệ → chuyển server + lưu JobId
+-- ✅ Nếu server sai → teleport sang server phù hợp
 if shouldTeleport() then
     warn("❌ Invalid server - teleporting to a valid one...")
 
     local newServer = findPublicServer()
     if newServer then
-        _G.LastJobId = currentJobId -- Ghi lại JobId cũ trước khi chuyển
+        _G.LastJobId = currentJobId -- Ghi lại JobId cũ
         TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
     else
-        LocalPlayer:Kick("❌ Không tìm thấy server công khai hợp lệ.")
+        LocalPlayer:Kick("❌ No valid public server found.")
     end
-    return -- ❌ Không chạy script chính hay phụ lúc này
+    return -- ❌ Không chạy gì tiếp
 end
 
--- ✅ Nếu vừa rejoin sau khi teleport → chạy script phụ
+-- ✅ Nếu vừa rejoin sau teleport → chạy script phụ
 if _G.LastJobId and _G.LastJobId ~= currentJobId then
-    print("🔁 Vừa vào lại server sau khi teleport - đang chạy script phụ")
+    print("🔁 Rejoined server after teleport - running rejoin script")
     _G.LastJobId = currentJobId
 
     pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/NoLag-id/No-Lag-HUB/refs/heads/main/Loader/LoaderV1.lua"))()
     end)
 else
-    print("✅ Vào đúng server ngay từ đầu - KHÔNG chạy script phụ")
+    print("✅ Joined a valid server from the start - skipping rejoin script")
 end
 
 -- ✅ Cuối cùng, luôn chạy script chính
-print("✅ Đang chạy script chính...")
+print("✅ Running main script...")
 pcall(function()
-    loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Nam/refs/heads/main/AllInOne"))()
+    loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/GrowaGarden/refs/heads/main/NoLagHub"))()
 end)
