@@ -4,11 +4,9 @@ _G.ScriptAlreadyRunning = true
 
 -- ✅ Xóa cảnh báo cũ nếu còn tồn tại
 local oldAlert = game.CoreGui:FindFirstChild("ReRunAlert")
-if oldAlert then
-    oldAlert:Destroy()
-end
+if oldAlert then oldAlert:Destroy() end
 
--- ✅ Hàm hiển thị thông báo trên màn hình người chơi
+-- ✅ Hàm hiển thị thông báo đơn giản (ngoài UI mờ nền)
 local function showMessage(msg, color, name)
     local gui = Instance.new("ScreenGui", game.CoreGui)
     gui.Name = name or ("MessageUI_" .. tostring(math.random(1, 999999)))
@@ -28,18 +26,18 @@ local function showMessage(msg, color, name)
     end)
 end
 
--- ✅ Cấu hình ID game hợp lệ và dịch vụ Roblox
+-- ✅ Cấu hình game và dịch vụ
 local VALID_PLACE_ID = 126884695634066
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- ✅ Ghi lại JobId hiện tại để biết có phải vừa bị teleport hay không
+-- ✅ Ghi lại JobId để phát hiện teleport
 _G.LastJobId = _G.LastJobId or game.JobId
 local currentJobId = game.JobId
 
--- ✅ Hàm tìm server public phù hợp (dưới 5 người và khác JobId hiện tại)
+-- ✅ Tìm server hợp lệ (≤5 người, khác JobId, không VIP)
 local function findPublicServer()
     local cursor = ""
     local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(VALID_PLACE_ID)
@@ -68,7 +66,7 @@ local function findPublicServer()
     return nil
 end
 
--- ✅ Kiểm tra server hiện tại có hợp lệ không (đúng game ID, không phải server VIP, và không quá đông)
+-- ✅ Kiểm tra xem có cần chuyển server không
 local function shouldTeleport()
     if game.PlaceId ~= VALID_PLACE_ID then return true end
     if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then return true end
@@ -76,12 +74,29 @@ local function shouldTeleport()
     return false
 end
 
--- ✅ Nếu server sai → hiển thị thông báo và teleport sang server mới
+-- ✅ Nếu server sai → chuyển server
 if shouldTeleport() then
-    showMessage("🔄 Switching to optimal server, please wait...", Color3.fromRGB(255, 255, 0))
+    -- 🔄 UI làm mờ nền
+    local switchGui = Instance.new("ScreenGui", game.CoreGui)
+    switchGui.Name = "ServerSwitchUI"
+
+    local background = Instance.new("Frame", switchGui)
+    background.Size = UDim2.new(1, 0, 1, 0)
+    background.BackgroundColor3 = Color3.new(0, 0, 0)
+    background.BackgroundTransparency = 0.4
+
+    local textLabel = Instance.new("TextLabel", background)
+    textLabel.Size = UDim2.new(1, 0, 1, 0)
+    textLabel.BackgroundTransparency = 1
+    textLabel.Text = "🔄 Switching to a better server..."
+    textLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+    textLabel.Font = Enum.Font.GothamBold
+    textLabel.TextScaled = true
+
     local newServer = findPublicServer()
     if newServer then
         _G.LastJobId = currentJobId
+        task.wait(2) -- ✅ Đợi 2 giây để hiển thị UI
         TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
     else
         LocalPlayer:Kick("❌ No suitable server found.")
@@ -98,11 +113,10 @@ if _G.LastJobId and _G.LastJobId ~= currentJobId then
     pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/NoLag-id/No-Lag-HUB/refs/heads/main/Loader/LoaderV1.lua"))()
     end)
-
     return
 end
 
--- ✅ Nếu ở đúng server ngay từ đầu → chạy script chính
+-- ✅ Nếu đã vào đúng server → chạy script chính
 showMessage("✅ Running main script...", Color3.fromRGB(0, 255, 0))
 
 pcall(function()
