@@ -1,19 +1,45 @@
--- ✅ Ngăn chạy nhiều lần
+-- ✅ Ngăn script chạy nhiều lần
 if _G.ScriptAlreadyRunning then return end
 _G.ScriptAlreadyRunning = true
 
--- ✅ Cấu hình
+-- ✅ Xóa cảnh báo cũ nếu còn tồn tại
+local oldAlert = game.CoreGui:FindFirstChild("ReRunAlert")
+if oldAlert then
+    oldAlert:Destroy()
+end
+
+-- ✅ Hàm hiển thị thông báo trên màn hình người chơi
+local function showMessage(msg, color, name)
+    local gui = Instance.new("ScreenGui", game.CoreGui)
+    gui.Name = name or ("MessageUI_" .. tostring(math.random(1, 999999)))
+
+    local label = Instance.new("TextLabel", gui)
+    label.Size = UDim2.new(0.5, 0, 0.1, 0)
+    label.Position = UDim2.new(0.25, 0, 0.85, 0)
+    label.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+    label.TextColor3 = color or Color3.new(1, 1, 1)
+    label.TextScaled = true
+    label.Font = Enum.Font.GothamBold
+    label.Text = msg
+    label.ZIndex = 999
+
+    task.delay(4, function()
+        if gui.Name ~= "ReRunAlert" then gui:Destroy() end
+    end)
+end
+
+-- ✅ Cấu hình ID game hợp lệ và dịch vụ Roblox
 local VALID_PLACE_ID = 126884695634066
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
 local LocalPlayer = Players.LocalPlayer
 
--- ✅ Ghi lại JobId hiện tại nếu chưa có (dùng để kiểm tra rejoin)
+-- ✅ Ghi lại JobId hiện tại để biết có phải vừa bị teleport hay không
 _G.LastJobId = _G.LastJobId or game.JobId
 local currentJobId = game.JobId
 
--- ✅ Hàm tìm server public phù hợp (<= 5 người)
+-- ✅ Hàm tìm server public phù hợp (dưới 5 người và khác JobId hiện tại)
 local function findPublicServer()
     local cursor = ""
     local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(VALID_PLACE_ID)
@@ -42,7 +68,7 @@ local function findPublicServer()
     return nil
 end
 
--- ✅ Hàm kiểm tra nếu server hiện tại không hợp lệ
+-- ✅ Kiểm tra server hiện tại có hợp lệ không (đúng game ID, không phải server VIP, và không quá đông)
 local function shouldTeleport()
     if game.PlaceId ~= VALID_PLACE_ID then return true end
     if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then return true end
@@ -50,34 +76,35 @@ local function shouldTeleport()
     return false
 end
 
--- ✅ Nếu server sai → teleport sang server phù hợp
+-- ✅ Nếu server sai → hiển thị thông báo và teleport sang server mới
 if shouldTeleport() then
-    warn("❌ Invalid server - teleporting to a valid one...")
-
+    showMessage("🔄 Switching to optimal server, please wait...", Color3.fromRGB(255, 255, 0))
     local newServer = findPublicServer()
     if newServer then
-        _G.LastJobId = currentJobId -- Ghi lại JobId cũ
+        _G.LastJobId = currentJobId
         TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
     else
-        LocalPlayer:Kick("❌ No valid public server found.")
+        LocalPlayer:Kick("❌ No suitable server found.")
     end
-    return -- ❌ Không chạy gì tiếp
+    return
 end
 
--- ✅ Nếu vừa rejoin sau teleport → chạy script phụ
+-- ✅ Nếu vừa bị teleport → hiển thị cảnh báo và chạy script phụ
 if _G.LastJobId and _G.LastJobId ~= currentJobId then
-    print("🔁 Rejoined server after teleport - running rejoin script")
     _G.LastJobId = currentJobId
+    showMessage("⚠️ Please re-run the script to continue", Color3.fromRGB(255, 180, 0), "ReRunAlert")
 
+    -- ✅ Chạy script phụ sau khi teleport
     pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/NoLag-id/No-Lag-HUB/refs/heads/main/Loader/LoaderV1.lua"))()
     end)
-else
-    print("✅ Joined a valid server from the start - skipping rejoin script")
+
+    return
 end
 
--- ✅ Cuối cùng, luôn chạy script chính
-print("✅ Running main script...")
+-- ✅ Nếu ở đúng server ngay từ đầu → chạy script chính
+showMessage("✅ Running main script...", Color3.fromRGB(0, 255, 0))
+
 pcall(function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/GrowaGarden/refs/heads/main/NoLagHub"))()
 end)
