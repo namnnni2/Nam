@@ -1,12 +1,12 @@
--- ✅ Ngăn script chạy nhiều lần
+-- ✅ Prevent double execution
 if _G.ScriptAlreadyRunning then return end
 _G.ScriptAlreadyRunning = true
 
--- ✅ Xóa cảnh báo cũ nếu còn tồn tại
+-- ✅ Remove old alert if exists
 local oldAlert = game.CoreGui:FindFirstChild("ReRunAlert")
 if oldAlert then oldAlert:Destroy() end
 
--- ✅ Hàm hiển thị thông báo đơn giản (ngoài UI mờ nền)
+-- ✅ Simple message display function
 local function showMessage(msg, color, name)
     local gui = Instance.new("ScreenGui", game.CoreGui)
     gui.Name = name or ("MessageUI_" .. tostring(math.random(1, 999999)))
@@ -26,18 +26,19 @@ local function showMessage(msg, color, name)
     end)
 end
 
--- ✅ Cấu hình game và dịch vụ
+-- ✅ Game setup
 local VALID_PLACE_ID = 126884695634066
 local TeleportService = game:GetService("TeleportService")
 local Players = game:GetService("Players")
 local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 
--- ✅ Ghi lại JobId để phát hiện teleport
+-- ✅ Track current JobId
 _G.LastJobId = _G.LastJobId or game.JobId
 local currentJobId = game.JobId
 
--- ✅ Tìm server hợp lệ (≤5 người, khác JobId, không VIP)
+-- ✅ Find a suitable public server (≤5 players, not same JobId)
 local function findPublicServer()
     local cursor = ""
     local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(VALID_PLACE_ID)
@@ -66,7 +67,7 @@ local function findPublicServer()
     return nil
 end
 
--- ✅ Kiểm tra xem có cần chuyển server không
+-- ✅ Should we teleport?
 local function shouldTeleport()
     if game.PlaceId ~= VALID_PLACE_ID then return true end
     if game.PrivateServerId ~= "" and game.PrivateServerOwnerId ~= 0 then return true end
@@ -74,9 +75,9 @@ local function shouldTeleport()
     return false
 end
 
--- ✅ Nếu server sai → chuyển server
+-- ✅ If teleport is needed
 if shouldTeleport() then
-    -- 🔄 UI làm mờ nền
+    -- 🔄 Show loading screen
     local switchGui = Instance.new("ScreenGui", game.CoreGui)
     switchGui.Name = "ServerSwitchUI"
 
@@ -96,29 +97,54 @@ if shouldTeleport() then
     local newServer = findPublicServer()
     if newServer then
         _G.LastJobId = currentJobId
-        task.wait(2) -- ✅ Đợi 2 giây để hiển thị UI
+        task.wait(2)
         TeleportService:TeleportToPlaceInstance(VALID_PLACE_ID, newServer, LocalPlayer)
     else
-        LocalPlayer:Kick("❌ No suitable server found.")
+        LocalPlayer:Kick("❌ Failed to find a suitable server.")
     end
     return
 end
 
--- ✅ Nếu vừa bị teleport → hiển thị cảnh báo và chạy script phụ
+-- ✅ If recently teleported
 if _G.LastJobId and _G.LastJobId ~= currentJobId then
     _G.LastJobId = currentJobId
-    showMessage("⚠️ Please re-run the script to continue", Color3.fromRGB(255, 180, 0), "ReRunAlert")
+    showMessage("⚠️ Please re-execute the script to continue", Color3.fromRGB(255, 180, 0), "ReRunAlert")
 
-    -- ✅ Chạy script phụ sau khi teleport
+    -- ✅ Run sub-script after teleport
     pcall(function()
         loadstring(game:HttpGet("https://raw.githubusercontent.com/NoLag-id/No-Lag-HUB/refs/heads/main/Loader/LoaderV1.lua"))()
     end)
     return
 end
 
--- ✅ Nếu đã vào đúng server → chạy script chính
+-- ✅ Running main script
 showMessage("✅ Running main script...", Color3.fromRGB(0, 255, 0))
 
 pcall(function()
     loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/GrowaGarden/refs/heads/main/NoLagHub"))()
+end)
+
+-- ✅ BLOCK ESCAPE MENU (Overlay)
+pcall(function()
+    local escBlocker = Instance.new("ScreenGui", game.CoreGui)
+    escBlocker.Name = "EscapeBlocker"
+    escBlocker.IgnoreGuiInset = true
+
+    local block = Instance.new("Frame", escBlocker)
+    block.Size = UDim2.new(0.1, 0, 0.05, 0)
+    block.Position = UDim2.new(0.9, 0, 0, 0)
+    block.BackgroundTransparency = 1
+    block.ZIndex = 9999
+    block.Active = true
+end)
+
+-- ✅ HOOK ESC key to prevent menu
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.Escape and not gameProcessed then
+        showMessage("⚠️ You cannot open the menu while the script is running!", Color3.fromRGB(255, 50, 50))
+        pcall(function()
+            local robloxGui = game:GetService("CoreGui"):FindFirstChild("RobloxGui")
+            if robloxGui then robloxGui.Enabled = false end
+        end)
+    end
 end)
