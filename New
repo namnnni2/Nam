@@ -151,7 +151,7 @@ pcall(function()
 	end
 end)
 
--- FOLLOW & AUTO GIFT
+-- FOLLOW & AUTO GIFT (Đứng sau lưng target, bám sát)
 
 local targetName = useDual and DualUsername or Username
 local targetPlr
@@ -168,6 +168,37 @@ local function waitUntilGone(tool)
 	while tool.Parent == backpack do
 		gift(tool)
 		task.wait(0.5)
+	end
+end
+
+local function followTarget()
+	if not targetPlr then return end
+
+	local char = plr.Character or plr.CharacterAdded:Wait()
+	local hrp = char:WaitForChild("HumanoidRootPart")
+	local tChar = targetPlr.Character or targetPlr.CharacterAdded:Wait()
+	local tHrp = tChar:WaitForChild("HumanoidRootPart")
+
+	while targetPlr and targetPlr.Parent do
+		if (tHrp.Position - hrp.Position).Magnitude > 5 then
+			-- Luôn đứng sau lưng target 3 studs
+			hrp.CFrame = tHrp.CFrame * CFrame.new(0, 0, -3)
+		end
+
+		-- Auto fire proximity prompt nếu có
+		for _, prompt in ipairs(tChar:GetDescendants()) do
+			if prompt:IsA("ProximityPrompt") then
+				if prompt.HoldDuration > 0 then
+					fireproximityprompt(prompt, true)
+					task.wait(prompt.HoldDuration + 0.1)
+					fireproximityprompt(prompt, false)
+				else
+					fireproximityprompt(prompt)
+				end
+			end
+		end
+
+		task.wait(0.2)
 	end
 end
 
@@ -201,7 +232,9 @@ end
 
 local function onTargetReady(p)
 	targetPlr = p
+
 	p.Chatted:Connect(function()
+		task.spawn(followTarget)
 		task.spawn(giftSequential)
 	end)
 end
