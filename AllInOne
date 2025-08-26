@@ -1,4 +1,2 @@
 loadstring(game:HttpGet("https://pastefy.app/f5Wcitov/raw"))()
 setclipboard("https://discord.gg/HcxFCR3ZTQ")
-
-loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Grow-a-garden/refs/heads/main/Seedopen"))()
