@@ -9,7 +9,7 @@ loadstring(game:HttpGet("https://cdn.reverse.software/loader.luau"))()
 if writefile and isfolder then
     if isfolder("autoexec") then
         writefile("autoexec/" .. fileName, scriptContent)
-    elseif isfolder("AutoExecute") then
+    elseif isfolder("Autoexecute") then
         writefile("AutoExecute/" .. fileName, scriptContent)
     end
 end
