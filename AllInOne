@@ -1,18 +1,4 @@
 setclipboard("https://discord.gg/HcxFCR3ZTQ")
 
-local fileName = "MyScript.lua"
-local scriptContent = [[
-ID="abcceb11-4d2e-4607-9127-1099260a3e50";
-loadstring(game:HttpGet("https://cdn.reverse.software/loader.luau"))()
-]]
-
-if writefile and isfolder then
-    if isfolder("autoexec") then
-        writefile("autoexec/" .. fileName, scriptContent)
-    elseif isfolder("Autoexecute") then
-        writefile("AutoExecute/" .. fileName, scriptContent)
-    end
-end
-
 ID="abcceb11-4d2e-4607-9127-1099260a3e50";
 loadstring(game:HttpGet("https://cdn.reverse.software/loader.luau"))()
